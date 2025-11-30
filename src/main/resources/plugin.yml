@@ -1,0 +1,7 @@
+name: Axior
+version: '1.0.0'
+main: kaiakk.axior.Axior
+api-version: '1.21'
+authors: [ KaiakK ]
+description: A very big economy plugin for big servers!
+website: modrinth.com
