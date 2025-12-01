@@ -19,10 +19,35 @@ public class PermissionsFolia {
 		if (apiProvider != null) return;
 		Logger logger = plugin.getLogger();
 		try {
-			apiClass = Class.forName("kaiakk.foliaPerms.api.FoliaPermsAPI");
-			RegisteredServiceProvider<?> rsp = Bukkit.getServicesManager().getRegistration((Class) apiClass);
-			if (rsp != null) {
-				apiProvider = rsp.getProvider();
+			final String apiName = "kaiakk.foliaPerms.api.FoliaPermsAPI";
+			try {
+				apiClass = Class.forName(apiName);
+				RegisteredServiceProvider<?> rsp = Bukkit.getServicesManager().getRegistration((Class) apiClass);
+				if (rsp != null) {
+					apiProvider = rsp.getProvider();
+				}
+			} catch (ClassNotFoundException ignored) {
+				apiClass = null;
+			}
+
+			if (apiProvider == null) {
+				for (org.bukkit.plugin.Plugin pl : Bukkit.getPluginManager().getPlugins()) {
+					try {
+						ClassLoader cl = pl.getClass().getClassLoader();
+						Class<?> candidate = cl.loadClass(apiName);
+						RegisteredServiceProvider<?> rsp2 = Bukkit.getServicesManager().getRegistration((Class) candidate);
+						if (rsp2 != null) {
+							apiClass = candidate;
+							apiProvider = rsp2.getProvider();
+							break;
+						}
+					} catch (ClassNotFoundException ignored2) {
+					} catch (Throwable ignored3) {
+					}
+				}
+			}
+
+			if (apiProvider != null && apiClass != null) {
 				try {
 					mHasPermissionPlayer = apiClass.getMethod("hasPermission", Player.class, String.class);
 				} catch (NoSuchMethodException ignored) {
@@ -35,8 +60,6 @@ public class PermissionsFolia {
 			} else {
 				logger.warning("FoliaPerms API not found via ServicesManager.");
 			}
-		} catch (ClassNotFoundException e) {
-			logger.info("FoliaPerms API class not present: " + e.getMessage());
 		} catch (Throwable t) {
 			logger.warning("Failed to initialize FoliaPerms integration: " + t.getMessage());
 		}

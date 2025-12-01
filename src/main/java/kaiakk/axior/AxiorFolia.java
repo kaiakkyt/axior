@@ -157,88 +157,79 @@ public final class AxiorFolia implements org.bukkit.command.CommandExecutor, Tab
                 init(plugin);
                 return foliaAvailable;
             }
-
             static void runTask(JavaPlugin plugin, Runnable task) {
                 init(plugin);
-                init(plugin);
-                if (foliaAvailable) {
-                    Object rs = getRegionSchedulerInstance(plugin);
-                    if (rs != null && mRun != null) {
-                        try {
-                            mRun.invoke(rs, task);
-                            return;
-                        } catch (Throwable t) {
-                            try { plugin.getLogger().warning("Folia RegionScheduler run() invocation failed, falling back to Bukkit scheduler: " + t.getMessage()); } catch (Throwable ignored) {}
-                        }
+                if (!foliaAvailable) {
+                    try { plugin.getLogger().severe("Folia RegionScheduler not available; skipping scheduled task."); } catch (Throwable ignored) {}
+                    return;
+                }
+                Object rs = getRegionSchedulerInstance(plugin);
+                if (rs != null && mRun != null) {
+                    try {
+                        mRun.invoke(rs, task);
+                        return;
+                    } catch (Throwable t) {
+                        try { plugin.getLogger().warning("Folia RegionScheduler invocation failed: " + t.getMessage()); } catch (Throwable ignored) {}
+                        return;
                     }
                 }
-
-                try {
-                    Bukkit.getScheduler().runTask(plugin, task);
-                    return;
-                } catch (Throwable t) {
-                    throw new IllegalStateException("Failed to schedule task on both Folia RegionScheduler and Bukkit scheduler.", t);
-                }
+                try { plugin.getLogger().warning("Folia RegionScheduler instance or run method not found; skipping scheduled task."); } catch (Throwable ignored) {}
             }
 
             static void runTaskLater(JavaPlugin plugin, Runnable task, long delay) {
                 init(plugin);
-                if (foliaAvailable) {
-                    Object rs = getRegionSchedulerInstance(plugin);
-                    if (rs != null && mRunLater != null) {
-                        try {
-                            mRunLater.invoke(rs, task, delay);
-                            return;
-                        } catch (Throwable t) {
-                            try { plugin.getLogger().warning("Folia RegionScheduler runLater() invocation failed, falling back to Bukkit scheduler: " + t.getMessage()); } catch (Throwable ignored) {}
-                        }
+                if (!foliaAvailable) {
+                    try { plugin.getLogger().severe("Folia RegionScheduler not available; skipping delayed task."); } catch (Throwable ignored) {}
+                    return;
+                }
+                Object rs = getRegionSchedulerInstance(plugin);
+                if (rs != null && mRunLater != null) {
+                    try {
+                        mRunLater.invoke(rs, task, delay);
+                        return;
+                    } catch (Throwable t) {
+                        try { plugin.getLogger().warning("Folia RegionScheduler runLater invocation failed: " + t.getMessage()); } catch (Throwable ignored) {}
+                        return;
                     }
                 }
-
-                try {
-                    Bukkit.getScheduler().runTaskLater(plugin, task, delay);
-                    return;
-                } catch (Throwable t) {
-                    throw new IllegalStateException("Failed to schedule delayed task on both Folia RegionScheduler and Bukkit scheduler.", t);
-                }
+                try { plugin.getLogger().warning("Folia RegionScheduler instance or runLater method not found; skipping delayed task."); } catch (Throwable ignored) {}
             }
 
             static void runTaskTimerAsync(JavaPlugin plugin, Runnable task, long delay, long period) {
                 init(plugin);
-                if (foliaAvailable) {
-                    Object rs = getRegionSchedulerInstance(plugin);
-                    if (rs != null && mRunTimer != null) {
-                        try {
-                            mRunTimer.invoke(rs, task, delay, period);
-                            return;
-                        } catch (Throwable t) {
-                            try { plugin.getLogger().warning("Folia RegionScheduler runTimer() invocation failed, falling back to Bukkit async scheduler: " + t.getMessage()); } catch (Throwable ignored) {}
-                        }
-                    }
-
-                    if (rs != null && mRunLater != null) {
-                        try {
-                            Runnable wrapper = new Runnable() {
-                                @Override
-                                public void run() {
-                                    try { task.run(); } catch (Throwable ignored) {}
-                                    try { runTaskLater(plugin, this, period); } catch (Throwable ignored) {}
-                                }
-                            };
-                            mRunLater.invoke(rs, wrapper, delay);
-                            return;
-                        } catch (Throwable t) {
-                            try { plugin.getLogger().warning("Folia RegionScheduler runLater() invocation failed while emulating timer, falling back to Bukkit async scheduler: " + t.getMessage()); } catch (Throwable ignored) {}
-                        }
-                    }
-                }
-
-                try {
-                    Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, task, delay, period);
+                if (!foliaAvailable) {
+                    try { plugin.getLogger().severe("Folia RegionScheduler not available; skipping repeating task."); } catch (Throwable ignored) {}
                     return;
-                } catch (Throwable t) {
-                    throw new IllegalStateException("Failed to schedule repeating task on both Folia RegionScheduler and Bukkit scheduler.", t);
                 }
+                Object rs = getRegionSchedulerInstance(plugin);
+                if (rs != null && mRunTimer != null) {
+                    try {
+                        mRunTimer.invoke(rs, task, delay, period);
+                        return;
+                    } catch (Throwable t) {
+                        try { plugin.getLogger().warning("Folia RegionScheduler runTimer invocation failed: " + t.getMessage()); } catch (Throwable ignored) {}
+                        return;
+                    }
+                }
+
+                if (rs != null && mRunLater != null) {
+                    try {
+                        Runnable wrapper = new Runnable() {
+                            @Override
+                            public void run() {
+                                try { task.run(); } catch (Throwable ignored) {}
+                                try { runTaskLater(plugin, this, period); } catch (Throwable ignored) {}
+                            }
+                        };
+                        mRunLater.invoke(rs, wrapper, delay);
+                        return;
+                    } catch (Throwable t) {
+                        try { plugin.getLogger().warning("Folia RegionScheduler runLater invocation failed while emulating timer: " + t.getMessage()); } catch (Throwable ignored) {}
+                        return;
+                    }
+                }
+
+                try { plugin.getLogger().warning("Folia RegionScheduler instance or suitable repeating method not found; skipping repeating task."); } catch (Throwable ignored) {}
             }
     }
 
@@ -258,17 +249,12 @@ public final class AxiorFolia implements org.bukkit.command.CommandExecutor, Tab
         } catch (Throwable t) {
             getLogger().warning("PermissionsFolia.init() failed: " + t.getMessage());
         }
-
         try {
             if (!PermissionsFolia.isAvailable()) {
-                getLogger().severe("FoliaPerms not detected — Axior (Folia) requires FoliaPerms. Disabling plugin.");
-                try {
-                    getServer().getPluginManager().disablePlugin(getPlugin());
-                } catch (Throwable ignore) {}
-                return;
+                getLogger().warning("FoliaPerms not detected at startup; will re-check during ServerLoadEvent before disabling.");
             }
         } catch (Throwable t) {
-            getLogger().warning("Error while checking FoliaPerms availability: " + t.getMessage());
+            getLogger().warning("Error while checking FoliaPerms availability at startup: " + t.getMessage());
         }
 
         try {
@@ -408,6 +394,19 @@ public final class AxiorFolia implements org.bukkit.command.CommandExecutor, Tab
         }
 
         try {
+            PermissionsFolia.init(getPlugin());
+        } catch (Throwable t) {
+            getLogger().warning("PermissionsFolia.init() retry failed: " + t.getMessage());
+        }
+        try {
+                if (!PermissionsFolia.isAvailable()) {
+                getLogger().severe("FoliaPerms not detected — some Folia-specific features will be disabled. Plugin will remain enabled.");
+            }
+        } catch (Throwable t) {
+            getLogger().warning("Error while re-checking FoliaPerms availability: " + t.getMessage());
+        }
+
+        try {
             long healthHours = getConfig().getLong("serverHealthHours", 24L);
             if (healthHours > 0) {
                 long periodTicks = Math.max(1L, healthHours) * 3600L * 20L;
@@ -447,7 +446,7 @@ public final class AxiorFolia implements org.bukkit.command.CommandExecutor, Tab
                     if (FoliaScheduler.isAvailable(getPlugin())) {
                         runTaskTimerAsync(getPlugin(), reportTask, 20L, periodTicks);
                     } else {
-                        Bukkit.getScheduler().runTaskTimerAsynchronously(getPlugin(), reportTask, 20L, periodTicks);
+                        getLogger().severe("Folia RegionScheduler not available — skipping scheduling of server health reports. Plugin will remain enabled.");
                     }
                 } catch (Throwable t) {
                     getLogger().warning("Failed to schedule health reports: " + t.getMessage());
@@ -537,13 +536,8 @@ public final class AxiorFolia implements org.bukkit.command.CommandExecutor, Tab
             runTaskLater(getPlugin(), joinInspect, 60L);
         } catch (Throwable t) {
             try {
-                getLogger().warning("Folia scheduler failed in onPlayerJoin; falling back to Bukkit scheduler: " + t.getMessage());
+                getLogger().severe("Folia scheduler failed in onPlayerJoin: " + t.getMessage());
             } catch (Throwable ignored) {}
-            try {
-                Bukkit.getScheduler().runTaskLater(getPlugin(), joinInspect, 60L);
-            } catch (Throwable t2) {
-                try { getLogger().warning("Failed to schedule join inspect on Bukkit scheduler: " + t2.getMessage()); } catch (Throwable ignored) {}
-            }
         }
         handleVanishVisibilityForJoining(p);
         checkAltsOnJoin(p);

@@ -5,6 +5,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
@@ -32,20 +33,14 @@ public class VersionCheckerFolia {
 					} else {
 						plugin.getLogger().fine("Axior is up to date (" + currentVersion + ").");
 					}
+				} catch (IOException e) {
+					plugin.getLogger().severe("Version check failed: " + e.getMessage());
 				} catch (Throwable t) {
-					plugin.getLogger().warning("Version check failed: " + t.getMessage());
+					plugin.getLogger().log(java.util.logging.Level.SEVERE, "Version check failed", t);
 				}
 			});
 		} catch (Throwable t) {
-			new Thread(() -> {
-				try {
-					String latest = fetchLatestVersion();
-					if (latest == null) return;
-					if (isNewer(latest, currentVersion)) {
-						plugin.getLogger().info("A new Axior version is available: " + latest + " (you have " + currentVersion + "). See: " + MODRINTH_VERSIONS_URL);
-					}
-				} catch (Throwable ignored) {}
-			}).start();
+			plugin.getLogger().log(java.util.logging.Level.SEVERE, "VersionCheckerFolia failed to schedule async task", t);
 		}
 	}
 
@@ -58,9 +53,26 @@ public class VersionCheckerFolia {
 			conn.setConnectTimeout(10000);
 			conn.setReadTimeout(10000);
 
-			try (BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
-				String line;
-				List<String> versions = new ArrayList<>();
+			int code = conn.getResponseCode();
+			java.io.InputStream stream = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+			StringBuilder body = new StringBuilder();
+			if (stream != null) {
+				try (BufferedReader in = new BufferedReader(new InputStreamReader(stream))) {
+					String line;
+					while ((line = in.readLine()) != null) {
+						body.append(line).append('\n');
+					}
+				}
+			}
+			if (code < 200 || code >= 300) {
+				String bodyStr = body.toString().trim();
+				throw new IOException("Modrinth responded with HTTP " + code + ": " + truncate(bodyStr, 500));
+			}
+
+			String content = body.toString();
+			String line;
+			List<String> versions = new ArrayList<>();
+			try (BufferedReader in = new BufferedReader(new java.io.StringReader(content))) {
 				while ((line = in.readLine()) != null) {
 					Matcher m = VERSION_PATTERN.matcher(line);
 					while (m.find()) {
@@ -70,13 +82,19 @@ public class VersionCheckerFolia {
 						}
 					}
 				}
-				if (versions.isEmpty()) return null;
-				Collections.sort(versions, VersionCheckerFolia::compareVersions);
-				return versions.get(versions.size() - 1);
 			}
+			if (versions.isEmpty()) return null;
+			Collections.sort(versions, VersionCheckerFolia::compareVersions);
+			return versions.get(versions.size() - 1);
 		} finally {
 			if (conn != null) conn.disconnect();
 		}
+	}
+
+	private static String truncate(String s, int max) {
+		if (s == null) return "";
+		if (s.length() <= max) return s;
+		return s.substring(0, max) + "... (truncated " + (s.length() - max) + " chars)";
 	}
 
 	private static int compareVersions(String a, String b) {
