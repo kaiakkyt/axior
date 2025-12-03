@@ -1,1 +1,1 @@
-.\gradlew.bat clean shadowJar
+./gradlew clean build

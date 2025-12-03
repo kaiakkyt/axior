@@ -1,11 +1,11 @@
 plugins {
     id 'java'
-    id 'com.github.johnrengelman.shadow' version '8.1.1'
-    id("xyz.jpenilla.run-paper") version "2.3.1"
+    id 'com.github.johnrengelman.shadow' version '8.1.1' 
 }
 
 group = 'kaiakk'
-version = '1.0.1'
+version = '2.00.0'
+def targetJavaVersion = 21
 
 repositories {
     mavenCentral()
@@ -13,27 +13,71 @@ repositories {
         name = "papermc-repo"
         url = "https://repo.papermc.io/repository/maven-public/"
     }
+    maven {
+        name = "sonatype"
+        url = "https://oss.sonatype.org/content/repositories/snapshots"
+    }
+}
+
+sourceSets {
+    bukkitFolia {
+        java {
+            srcDirs = ['bukkit-folia/main/java']
+        }
+        resources {
+            srcDirs = ['bukkit-folia/main/resources']
+        }
+    }
+
+    bungeeWaterfall {
+        java {
+            srcDirs = ['bungeecord-waterfall/main/java']
+        }
+        resources {
+            srcDirs = ['bungeecord-waterfall/main/resources']
+        }
+    }
+
+    velocity {
+        java {
+            srcDirs = ['velocity/main/java']
+        }
+        resources {
+            srcDirs = ['velocity/main/templates', 'velocity/main/resources']
+        }
+    }
+}
+
+configurations {
+    bukkitFoliaCompileOnly.extendsFrom compileOnly
+    bukkitFoliaImplementation.extendsFrom implementation
+    bukkitFoliaRuntimeClasspath.extendsFrom runtimeClasspath
+
+    bungeeWaterfallCompileOnly.extendsFrom compileOnly
+    bungeeWaterfallImplementation.extendsFrom implementation
+    bungeeWaterfallRuntimeClasspath.extendsFrom runtimeClasspath
+
+    velocityCompileOnly.extendsFrom compileOnly
+    velocityAnnotationProcessor.extendsFrom annotationProcessor
+    velocityImplementation.extendsFrom implementation
+    velocityRuntimeClasspath.extendsFrom runtimeClasspath
 }
 
 dependencies {
-    compileOnly("io.papermc.paper:paper-api:1.21-R0.1-SNAPSHOT")
-    compileOnly 'net.kyori:adventure-api:4.14.0'
-    compileOnly 'net.kyori:adventure-platform-bukkit:4.2.0'
+    add('bukkitFoliaCompileOnly', 'io.papermc.paper:paper-api:1.21-R0.1-SNAPSHOT')
+    add('bukkitFoliaCompileOnly', 'net.kyori:adventure-api:4.14.0')
+    add('bukkitFoliaCompileOnly', 'net.kyori:adventure-platform-bukkit:4.2.0')
+
+    add('bungeeWaterfallCompileOnly', 'net.md-5:bungeecord-api:1.20-R0.2')
+
+    add('velocityCompileOnly', 'com.velocitypowered:velocity-api:3.3.0-SNAPSHOT')
+    add('velocityAnnotationProcessor', 'com.velocitypowered:velocity-api:3.3.0-SNAPSHOT')
+    add('velocityImplementation', 'org.yaml:snakeyaml:2.0')
 }
 
-tasks {
-    runServer {
-        minecraftVersion("1.21")
-    }
-}
-
-def targetJavaVersion = 21
 java {
     sourceCompatibility = JavaVersion.toVersion(targetJavaVersion)
     targetCompatibility = JavaVersion.toVersion(targetJavaVersion)
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(targetJavaVersion)
-    }
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -41,22 +85,63 @@ tasks.withType(JavaCompile).configureEach {
     options.release.set(targetJavaVersion)
 }
 
-processResources {
-    def props = [version: version]
-    inputs.properties props
-    filteringCharset 'UTF-8'
-    filesMatching('plugin.yml') {
-        expand props
-    }
+tasks.named('compileVelocityJava', JavaCompile) {
+    options.release.set(17)
 }
 
-tasks {
-    shadowJar {
-        archiveClassifier.set('')
-        mergeServiceFiles()
-    }
+tasks.named('processBukkitFoliaResources', ProcessResources) {
+    expand(version: version)
+    filteringCharset = 'UTF-8'
+}
 
-    build {
-        dependsOn shadowJar
-    }
+tasks.named('processBungeeWaterfallResources', ProcessResources) {
+    expand(version: version)
+    filteringCharset = 'UTF-8'
+}
+
+tasks.named('processVelocityResources', ProcessResources) {
+    expand(version: version)
+    filteringCharset = 'UTF-8'
+}
+
+def baseName = 'Axior'
+
+tasks.register('shadowBukkitJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    dependsOn 'compileBukkitFoliaJava', 'processBukkitFoliaResources'
+    archiveBaseName.set("${baseName}-Bukkit")
+    archiveClassifier.set('')
+    archiveVersion.set(version)
+    from sourceSets.bukkitFolia.output
+    configurations = [project.configurations.bukkitFoliaRuntimeClasspath]
+    mergeServiceFiles()
+}
+
+tasks.register('shadowBungeeJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    dependsOn 'compileBungeeWaterfallJava', 'processBungeeWaterfallResources'
+    archiveBaseName.set("${baseName}-BungeeCord")
+    archiveClassifier.set('')
+    archiveVersion.set(version)
+    from sourceSets.bungeeWaterfall.output
+    configurations = [project.configurations.bungeeWaterfallRuntimeClasspath]
+    mergeServiceFiles()
+}
+
+tasks.register('shadowVelocityJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    dependsOn 'compileVelocityJava', 'processVelocityResources'
+    archiveBaseName.set("${baseName}-Velocity")
+    archiveClassifier.set('')
+    archiveVersion.set(version)
+    from sourceSets.velocity.output
+    configurations = [project.configurations.velocityRuntimeClasspath]
+    relocate 'org.yaml.snakeyaml', 'kaiakk.axior.libs.snakeyaml'
+    mergeServiceFiles()
+}
+
+tasks.build {
+    dependsOn shadowBukkitJar, shadowBungeeJar, shadowVelocityJar
+}
+
+jar.enabled = false
+tasks.named('shadowJar').configure {
+    enabled = false
 }
