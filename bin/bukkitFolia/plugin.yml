@@ -1,0 +1,236 @@
+name: Axior
+version: '2.00.0'
+main: kaiakk.axior.Axior
+api-version: '1.13'
+authors: [ KaiakK ]
+description: A plugin that updates Minecraft operator tools, brings new systems and helps finding info in console on startup!
+website: https://modrinth.com/plugin/axior
+folia-supported: true
+load: STARTUP
+softdepend: [ LuckPerms, FoliaPerms ] # to get permissions to work properly
+
+commands:
+  # axior.general / basic commands available to all players
+  report:
+    description: "Report a player to staff"
+    usage: "/report <username> [reason]"
+    permission: axior.general
+    permission-message: "You don't have permission to use this command."
+  ping:
+    description: "Simple ping command (general)"
+    usage: "/ping"
+    permission: axior.general
+    permission-message: "You don't have permission to use this command."
+  coordinates:
+    description: "Show your current coordinates (player only)"
+    usage: "/coordinates"
+    permission: axior.general
+    permission-message: "You don't have permission to use this command."
+  whoami:
+    description: "Show information about your account and session"
+    usage: "/whoami"
+    permission: axior.general
+    permission-message: "You don't have permission to use this command."  
+  playtime:
+    description: "Show playtime for yourself or another player"
+    usage: "/playtime [player]"
+    permission: axior.general
+    permission-message: "You don't have permission to use this command."
+  seen:
+    description: "Show last seen time or online status for a player"
+    usage: "/seen <player>"
+    permission: axior.general
+    permission-message: "You don't have permission to use this command."
+  
+  # axior.mod / a big set of moderator commands, not as much as admin permission
+  axior:
+    description: "Show Axior plugin info"
+    usage: "/axior"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+    aliases: [ax]
+  axmute:
+    description: "Mute a player for a number of minutes"
+    usage: "/axmute <username> <duration_minutes> [reason]"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+  axunmute:
+    description: "Unmute a player"
+    usage: "/axunmute <username>"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+  axreports:
+    description: "List recent reports"
+    usage: "/axreports <limit>"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."  
+  axinfo:
+    description: "Show info about a player: last login, playtime, IP, client"
+    usage: "/axinfo <username>"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."  
+  axmutes:
+    description: "List currently muted players (shows 10 most recent)"
+    usage: "/axmutes"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+  axfrozen:
+    description: "List currently frozen players (shows 10 most recent)"
+    usage: "/axfrozen"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+  axwarn:
+    description: "Warn a player; optionally include a reason (auto-ban based on config)"
+    usage: "/axwarn <player> [reason]"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+  axtp:
+    description: "Teleport a player to another player: /axtp <player> <target>"
+    usage: "/axtp <player> <target>"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+  axworldtp:
+    description: "Teleport to a world's spawn"
+    usage: "/axworldtp <world>"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+  axworldlist:
+    description: "List all loaded worlds and their dimensions"
+    usage: "/axworldlist"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."  
+  axghosted:
+    description: "List currently ghosted/vanished staff members (shows 10 most recent)"
+    usage: "/axghosted"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+  axlocate:
+    description: "Locate a player"
+    usage: "/axlocate <player>"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+  axspy:
+    description: "Toggle spy mode to see private messages"
+    usage: "/axspy <on|off>"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+  axinventory:
+    description: "View a player's inventory in a read-only GUI"
+    usage: "/axinventory <player>"
+    permission: axior.mod
+    permission-message: "You don't have permission to use this command."
+  
+  # axior.admin / more permissions including being able to ban
+  axban:
+    description: "Ban a player by name or IP address."
+    usage: "/axban <username> <duration> <normal|ip> [reason]"
+    permission: axior.admin
+    permission-message: "You don't have permission to use this command."
+  axpardon:
+    description: "Pardon a player (name and attempt to unban IP)"
+    usage: "/axpardon <username>"
+    permission: axior.admin
+    permission-message: "You don't have permission to use this command."
+  axfreeze:
+    description: "Freeze a player in place (prevent movement and jumping)"
+    usage: "/axfreeze <player> <duration_minutes>"
+    permission: axior.admin
+    permission-message: "You don't have permission to use this command."
+  axunfreeze:
+    description: "Unfreeze a player"
+    usage: "/axunfreeze <player>"
+    permission: axior.admin
+    permission-message: "You don't have permission to use this command."
+  axghost:
+    description: "Vanish a player (ghost / spectator mode)"
+    usage: "/axghost"
+    permission: axior.admin
+    permission-message: "You don't have permission to use this command."
+  axunghost:
+    description: "Un-vanish a player"
+    usage: "/axunghost"
+    permission: axior.admin
+    permission-message: "You don't have permission to use this command."
+  axinvincible:
+    description: "Toggle player invincibility (max resistance, hide particles)"
+    usage: "/axinvincible <on|off>"
+    permission: axior.admin
+    permission-message: "You don't have permission to use this command."
+  axbroadcast:
+    description: "Broadcast a message to all players (chat only)"
+    usage: "/axbroadcast [message]"
+    permission: axior.admin
+    permission-message: "You don't have permission to use this command."
+  axsend:
+    description: "Send a player to another server (proxy)"
+    usage: "/axsend <player> <server>"
+    permission: axior.admin
+    permission-message: "You don't have permission to use this command."
+  axnetworkkick:
+    description: "Kick a player from the entire proxy network"
+    usage: "/axnetworkkick <player> [reason]"
+    permission: axior.admin
+    permission-message: "You don't have permission to use this command."
+  axclean:
+    description: "Clean dropped items and small entity cleanup"
+    usage: "/axclean"
+    permission: axior.admin
+    permission-message: "You don't have permission to use this command."
+  
+  # axior.owner / highest level permissions, can actually manage the server and affect/change it
+  axserverinfo:
+    description: "Show server and runtime information"
+    usage: "/axserverinfo"
+    permission: axior.owner
+    permission-message: "You don't have permission to use this command."  
+    aliases: [axhealth]
+  axserver:
+    description: "Switch to another server on proxy networks"
+    usage: "/axserver <servername>"
+    permission: axior.owner
+    permission-message: "You don't have permission to use this command."
+  axserverlist:
+    description: "List all servers on proxy networks"
+    usage: "/axserverlist"
+    permission: axior.owner
+    permission-message: "You don't have permission to use this command."
+  axreload:
+    description: "Reload plugin config and admin data"
+    usage: "/axreload"
+    permission: axior.owner
+    permission-message: "You don't have permission to use this command." 
+  axexecute:
+    description: "Execute a console command via Axior (restricted)"
+    usage: "/axexecute <command>"
+    permission: axior.owner
+    permission-message: "You don't have permission to use this command."  
+  axmaintenance:
+    description: "Set the server into maintenance mode (only ops can join)"
+    usage: "/axmaintenance <on|off>"
+    permission: axior.owner
+    permission-message: "You don't have permission to use this command."
+    aliases: [axmm]
+  axdisabler:
+    description: "Force-disable a plugin and persist the disabled state"
+    usage: "/axdisabler <plugin> [confirm]"
+    permission: axior.owner
+    permission-message: "You don't have permission to use this command."
+  axenabler:
+    description: "Re-enable a previously force-disabled plugin"
+    usage: "/axenabler <plugin>"
+    permission: axior.owner
+    permission-message: "You don't have permission to use this command." 
+
+permissions: # luckperms maybe? i recommend it tbh
+  axior.owner:
+    description: "Allow use of every single Axior operator command!"
+    default: false # luckperms or some type of permission handler REQUIRED to get this permission configured!
+  axior.admin:
+    description: "Allow use of most high-level Axior operator commands!"
+    default: op
+  axior.mod:
+    description: "Allow use of most high-level Axior operator commands!"
+    default: op
+  axior.general:
+    description: "Allow use of general Axior commands like /report."
+    default: true

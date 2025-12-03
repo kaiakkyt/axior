@@ -1,0 +1,61 @@
+# WARNING! updates may change this config file pretty often!
+# so make sure to update it with new values every update!
+# also there will be a WHOLE lot of comments in this file to help you 
+
+# if a value is set to 0, it either means disabled, permanently or no limit depending on context
+general-info:
+  reportCooldownMinutes: 10
+  discord-webhook-url: "PASTE_YOUR_WEBHOOK_URL_HERE" # put your actual webhook URL here
+  serverHealthHours: 24
+  warningsToBan: 8
+  maintenanceMsg: "&cThe server is currently under maintenance mode, please try again later!"
+
+# any of these words in chat will be cancelled out
+# do NOT use the normal words, as the plugin looks for base64 encoded
+# if you use normal words, people can just search for them in the config file decoded
+# which is not a good thing if your list contains offensive slurs or swear words
+# so use a base64 encoder to encode your words before putting them here, i have already added some words for you guys :)
+# if you dont want banned words, leave the list empty, i also recommend you add similar words/typo/variations to the list
+# however i only recommend adding words that are actually offensive/inappropriate, not just words you dont like or swearing (unless kid-friendly server)
+bannedWordsList:
+  - "bmlnZ2E="
+  - "bmlnZ2Fy"
+  - "bmVncm8="
+  - "bmlnZ2Vy"
+  - "ZmFnZ290"
+  - "ZmFn"
+  - "ZHVtYmFzcw=="
+  - "ZGlja2hlYWQ="
+  - "dHJhbm55"
+  - "YmxhY2t5"
+  - "YmxhY2tpZQ=="
+  - "cmV0YXJk"
+  - "cmV0YXJkZWQ="
+  - "Y2hpbms="
+  - "d2hvcmU="
+  - "Yml0Y2g="
+  - "amV3"
+  - "aGl0bGVy"
+  - "bmF6aQ=="
+  - "Y3JhY2tlcg=="
+  - "dHdpbms="
+  - "Z3Jvb21lcg=="
+  - "cGVkb3BoaWxl"
+  - "cGVkbw=="
+  - "ZHlrZQ=="
+  - "cXVlZXI="
+
+# /axexecute commands that you want to block from admins/operators using
+# if you dont want to block any commands, leave the list empty
+blocked-executions:
+  - "op"
+  - "deop"
+  - "execute" # execute can by used to bypass these btw
+  - "axexecute" # to prevent infinite looping
+  - "axdisabler"
+  - "axenabler" 
+  - "stop"
+  - "restart"
+  - "reload"
+  - "rl"
+  - "whitelist"

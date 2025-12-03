@@ -1,0 +1,5 @@
+name: Axior
+version: '2.00.0'
+main: kaiakk.axior.Axior
+author: KaiakK
+description: A plugin that updates Minecraft operator tools, brings new systems and helps finding info in console on startup!
