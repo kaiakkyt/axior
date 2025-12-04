@@ -31,7 +31,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-@Plugin(id = "axior", name = "Axior", version = "2.10.0", description = "A plugin that updates Minecraft operator tools, brings new systems and helps finding info in console on startup!", url = "https://modrinth.com/plugin/axior", authors = {"KaiakK"})
+@Plugin(id = "axior", name = "Axior", version = "1.00.0", description = "A plugin that updates Minecraft operator tools, brings new systems and helps finding info in console on startup!", url = "https://modrinth.com/plugin/axior", authors = {"KaiakK"})
 public class Axior {
 
     private final ProxyServer proxy;
@@ -66,7 +66,7 @@ public class Axior {
     @Subscribe
     public void onProxyInitialization(ProxyInitializeEvent event) {
         logger.info("Enabling Axior for Velocity");
-        logger.info("Running Axior v2.10.0 by KaiakK");
+        logger.info("Running Axior v1.00.0 by KaiakK");
         
         adminFile = new File(dataDirectory.toFile(), "admin.yml");
         if (adminFile.getParentFile() != null && !adminFile.getParentFile().exists()) {
@@ -418,7 +418,7 @@ public class Axior {
         @Override
         public void execute(Invocation invocation) {
             CommandSource source = invocation.source();
-            source.sendMessage(Component.text("Axior v2.10.0 by KaiakK", NamedTextColor.AQUA));
+            source.sendMessage(Component.text("Axior v1.00.0 by KaiakK", NamedTextColor.AQUA));
             source.sendMessage(Component.text("Proxy plugin for Velocity", NamedTextColor.YELLOW));
             source.sendMessage(Component.text("Use /axproxyinfo for detailed server information", NamedTextColor.YELLOW));
         }

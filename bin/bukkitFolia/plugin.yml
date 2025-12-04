@@ -1,5 +1,5 @@
 name: Axior
-version: '2.10.0'
+version: '1.00.0'
 main: kaiakk.axior.Axior
 api-version: '1.13'
 authors: [ KaiakK ]
