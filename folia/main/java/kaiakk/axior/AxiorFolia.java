@@ -53,21 +53,23 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import org.bukkit.scheduler.BukkitRunnable;
+import java.lang.reflect.Method;
 
-import kaiakk.axior.integrations.DiscordBukkit;
-import kaiakk.axior.integrations.WebManagerBukkit;
-import kaiakk.axior.integrations.VersionCheckerBukkit;
+import kaiakk.axior.integrations.DiscordFolia;
+import kaiakk.axior.integrations.WebManagerFolia;
+import kaiakk.axior.integrations.VersionCheckerFolia;
+import kaiakk.axior.integrations.PermissionsFolia;
 import kaiakk.axior.proxy.ProxyListener;
 
-public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, TabCompleter, Listener, PluginMessageListener, PluginDelegate {
+public final class AxiorFolia implements org.bukkit.command.CommandExecutor, TabCompleter, Listener, PluginMessageListener, PluginDelegate {
     private final JavaPlugin plugin;
-    private WebManagerBukkit webManager;
+    private WebManagerFolia webManager;
     private ProxyListener proxyListener;
 
-    public AxiorBukkit(JavaPlugin plugin) {
+    public AxiorFolia(JavaPlugin plugin) {
         this.plugin = plugin;
     }
+
 
     private JavaPlugin getPlugin() { return this.plugin; }
     private org.bukkit.Server getServer() { return this.plugin.getServer(); }
@@ -88,10 +90,158 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
         } catch (Throwable ignored) {}
         return "unknown";
     }
+    
+    private static final class FoliaScheduler {
+        private static volatile boolean initialized = false;
+        private static volatile boolean foliaAvailable = false;
+
+        private static java.lang.reflect.Method mRun = null;
+        private static java.lang.reflect.Method mRunLater = null;
+        private static java.lang.reflect.Method mRunTimer = null;
+        private static java.lang.reflect.Method mGetRegionScheduler = null;
+
+        private static synchronized void init(JavaPlugin plugin) {
+            if (initialized) return;
+            initialized = true;
+            try {
+                Class<?> rsClass = Class.forName("io.papermc.paper.threadedregions.RegionScheduler");
+                foliaAvailable = true;
+
+                try {
+                    mGetRegionScheduler = plugin.getServer().getClass().getMethod("getRegionScheduler");
+                } catch (NoSuchMethodException ignored) {
+                    for (Method candidate : plugin.getServer().getClass().getMethods()) {
+                        if (candidate.getParameterCount() == 0 && rsClass.isAssignableFrom(candidate.getReturnType())) {
+                            mGetRegionScheduler = candidate;
+                            break;
+                        }
+                    }
+                }
+
+                Object rsInstance = null;
+                if (mGetRegionScheduler != null) {
+                    try { rsInstance = mGetRegionScheduler.invoke(plugin.getServer()); } catch (Throwable ignored) { rsInstance = null; }
+                }
+
+                Method[] methodsToInspect = (rsInstance != null) ? rsInstance.getClass().getMethods() : rsClass.getMethods();
+                for (Method mm : methodsToInspect) {
+                    Class<?>[] pts = mm.getParameterTypes();
+                    if (mRun == null && pts.length == 1 && Runnable.class.isAssignableFrom(pts[0])) {
+                        mRun = mm;
+                        continue;
+                    }
+                    if (mRunLater == null && pts.length == 2 && Runnable.class.isAssignableFrom(pts[0]) && (pts[1] == long.class || pts[1] == Long.class)) {
+                        mRunLater = mm;
+                        continue;
+                    }
+                    if (mRunTimer == null && pts.length == 3 && Runnable.class.isAssignableFrom(pts[0]) && (pts[1] == long.class || pts[1] == Long.class) && (pts[2] == long.class || pts[2] == Long.class)) {
+                        mRunTimer = mm;
+                        continue;
+                    }
+                }
+            } catch (ClassNotFoundException e) {
+                foliaAvailable = false;
+            } catch (Throwable t) {
+                foliaAvailable = false;
+            }
+        }
+
+        private static Object getRegionSchedulerInstance(JavaPlugin plugin) {
+            if (mGetRegionScheduler == null) return null;
+            try {
+                return mGetRegionScheduler.invoke(plugin.getServer());
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+
+            static boolean isAvailable(JavaPlugin plugin) {
+                init(plugin);
+                return foliaAvailable;
+            }
+            static void runTask(JavaPlugin plugin, Runnable task) {
+                init(plugin);
+                if (!foliaAvailable) {
+                    try { plugin.getLogger().severe("Folia RegionScheduler not available; skipping scheduled task."); } catch (Throwable ignored) {}
+                    return;
+                }
+                Object rs = getRegionSchedulerInstance(plugin);
+                if (rs != null && mRun != null) {
+                    try {
+                        mRun.invoke(rs, task);
+                        return;
+                    } catch (Throwable t) {
+                        try { plugin.getLogger().warning("Folia RegionScheduler invocation failed: " + t.getMessage()); } catch (Throwable ignored) {}
+                        return;
+                    }
+                }
+                try { plugin.getLogger().warning("Folia RegionScheduler instance or run method not found; skipping scheduled task."); } catch (Throwable ignored) {}
+            }
+
+            static void runTaskLater(JavaPlugin plugin, Runnable task, long delay) {
+                init(plugin);
+                if (!foliaAvailable) {
+                    try { plugin.getLogger().severe("Folia RegionScheduler not available; skipping delayed task."); } catch (Throwable ignored) {}
+                    return;
+                }
+                Object rs = getRegionSchedulerInstance(plugin);
+                if (rs != null && mRunLater != null) {
+                    try {
+                        mRunLater.invoke(rs, task, delay);
+                        return;
+                    } catch (Throwable t) {
+                        try { plugin.getLogger().warning("Folia RegionScheduler runLater invocation failed: " + t.getMessage()); } catch (Throwable ignored) {}
+                        return;
+                    }
+                }
+                try { plugin.getLogger().warning("Folia RegionScheduler instance or runLater method not found; skipping delayed task."); } catch (Throwable ignored) {}
+            }
+
+            static void runTaskTimerAsync(JavaPlugin plugin, Runnable task, long delay, long period) {
+                init(plugin);
+                if (!foliaAvailable) {
+                    try { plugin.getLogger().severe("Folia RegionScheduler not available; skipping repeating task."); } catch (Throwable ignored) {}
+                    return;
+                }
+                Object rs = getRegionSchedulerInstance(plugin);
+                if (rs != null && mRunTimer != null) {
+                    try {
+                        mRunTimer.invoke(rs, task, delay, period);
+                        return;
+                    } catch (Throwable t) {
+                        try { plugin.getLogger().warning("Folia RegionScheduler runTimer invocation failed: " + t.getMessage()); } catch (Throwable ignored) {}
+                        return;
+                    }
+                }
+
+                if (rs != null && mRunLater != null) {
+                    try {
+                        Runnable wrapper = new Runnable() {
+                            @Override
+                            public void run() {
+                                try { task.run(); } catch (Throwable ignored) {}
+                                try { runTaskLater(plugin, this, period); } catch (Throwable ignored) {}
+                            }
+                        };
+                        mRunLater.invoke(rs, wrapper, delay);
+                        return;
+                    } catch (Throwable t) {
+                        try { plugin.getLogger().warning("Folia RegionScheduler runLater invocation failed while emulating timer: " + t.getMessage()); } catch (Throwable ignored) {}
+                        return;
+                    }
+                }
+
+                try { plugin.getLogger().warning("Folia RegionScheduler instance or suitable repeating method not found; skipping repeating task."); } catch (Throwable ignored) {}
+            }
+    }
+
+    private static void runTask(JavaPlugin plugin, Runnable task) { FoliaScheduler.runTask(plugin, task); }
+    private static void runTaskLater(JavaPlugin plugin, Runnable task, long delay) { FoliaScheduler.runTaskLater(plugin, task, delay); }
+    private static void runTaskTimerAsync(JavaPlugin plugin, Runnable task, long delay, long period) { FoliaScheduler.runTaskTimerAsync(plugin, task, delay, period); }
     private File getDataFolder() { return this.plugin.getDataFolder(); }
 
     public void onEnable() {
-        webManager = new WebManagerBukkit();
+        webManager = new WebManagerFolia();
         webManager.init();
 
         proxyListener = new ProxyListener(getPlugin());
@@ -99,6 +249,38 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
         getLogger().info("ProxyListener initialized for BungeeCord/Waterfall/Velocity support");
 
         saveDefaultConfig();
+
+        try {
+            PermissionsFolia.init(getPlugin());
+        } catch (Throwable t) {
+            getLogger().warning("PermissionsFolia.init() failed: " + t.getMessage());
+        }
+        try {
+            if (!PermissionsFolia.isAvailable()) {
+                getLogger().warning("FoliaPerms not detected at startup; will re-check during ServerLoadEvent before disabling.");
+            }
+        } catch (Throwable t) {
+            getLogger().warning("Error while checking FoliaPerms availability at startup: " + t.getMessage());
+        }
+
+        try {
+            File df = getDataFolder();
+            getLogger().info("Folia diagnostic: dataFolder=" + (df == null ? "(null)" : df.getAbsolutePath()) + " exists=" + (df != null && df.exists()));
+            File cfgFile = new File(df, "config.yml");
+            getLogger().info("Folia diagnostic: data/config.yml exists=" + (cfgFile.exists()) + (cfgFile.exists() ? (" size=" + cfgFile.length()) : ""));
+            java.io.InputStream res = plugin.getResource("config.yml");
+            getLogger().info("Folia diagnostic: embedded config.yml resource present=" + (res != null));
+            try { if (res != null) res.close(); } catch (Throwable ignored) {}
+
+            try {
+                String hook = getConfig().getString("discord-webhook-url", "<missing>");
+                long health = getConfig().getLong("serverHealthHours", -1L);
+                getLogger().info("Folia diagnostic: getConfig.discord-webhook-url=" + (hook == null ? "<null>" : (hook.length() > 64 ? hook.substring(0,64) + "..." : hook)));
+                getLogger().info("Folia diagnostic: getConfig.serverHealthHours=" + health);
+            } catch (Throwable t) {
+                getLogger().warning("Folia diagnostic: failed to read getConfig() values: " + t.getMessage());
+            }
+        } catch (Throwable ignored) {}
 
         adminFile = new File(getDataFolder(), "admin.yml");
         if (adminFile.getParentFile() != null && !adminFile.getParentFile().exists()) {
@@ -114,6 +296,16 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
         }
         if (adminFile != null) {
             adminConfig = YamlConfiguration.loadConfiguration(adminFile);
+            try {
+                getLogger().info("Folia diagnostic: admin.yml path=" + adminFile.getAbsolutePath() + " exists=" + adminFile.exists() + " size=" + (adminFile.exists() ? adminFile.length() : 0L));
+                if (adminConfig != null) {
+                    try {
+                        getLogger().info("Folia diagnostic: admin.yml top-level keys=" + adminConfig.getKeys(false));
+                    } catch (Throwable t) {
+                        getLogger().warning("Folia diagnostic: failed to read adminConfig keys: " + t.getMessage());
+                    }
+                }
+            } catch (Throwable ignored) {}
         } else {
             adminConfig = null;
         }
@@ -144,15 +336,13 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
         getLogger().info("Running Axior v" + getDescription().getVersion() + " by " + String.join(", ", getDescription().getAuthors()));
         getLogger().info("Plugin messaging channels registered: " + Arrays.toString(channels)); 
         getLogger().info("Jar file name: " + getJarFileName());
-        if (Bukkit.getPluginManager().getPlugin("LuckPerms") != null) {
-            getLogger().info("LuckPerms detected, using LuckPerms permissions API.");
-            getLogger().info("This will change how in-game permissions work, as it is using the LuckPerms system.");
-            getLogger().info("However this does not change anything within Axior itself.");
-        } else {
-            getLogger().info("LuckPerms not found, using default Bukkit permissions handler.");
-            getLogger().info("Some permissions will not be available unless you download LuckPerms or some type of permissions plugin.");
-            getLogger().info("However if you want a better permission system on your server, consider installing LuckPerms.");
-        }
+        try {
+            if (PermissionsFolia.isAvailable()) {
+                getLogger().info("FoliaPerms detected, using FoliaPerms API for permissions.");
+            } else {
+                getLogger().warning("FoliaPerms not detected — some permission features may be unavailable.");
+            }
+        } catch (Throwable ignored) {}
         
         for (org.bukkit.plugin.Plugin pl : Bukkit.getPluginManager().getPlugins()) {
             PluginDescriptionFile desc = pl.getDescription();
@@ -190,57 +380,85 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
         getLogger().info("Report cooldown: " + cfgMinutes + " minutes");
         getLogger().info("Discord webhook url set to " + getConfig().getString("discord-webhook-url", "not available (not configured)"));
 
+
+
+    }
+
+    @EventHandler
+    public void onServerLoad(ServerLoadEvent event) {
         try {
-            VersionCheckerBukkit.check(getPlugin(), getDescription().getVersion());
-        } catch (Throwable t) {
-            getLogger().warning("VersionCheckerBukkit failed: " + t.getMessage());
-        }
-
-        Bukkit.getScheduler().runTask(getPlugin(), () -> {
             int worldCount = Bukkit.getWorlds().size();
-            List<String> worldNames = Bukkit.getWorlds().stream()
-                    .map(world -> world.getName())
-                    .collect(Collectors.toList());
-
+            List<String> worldNames = Bukkit.getWorlds().stream().map(world -> world.getName()).collect(Collectors.toList());
             getLogger().info("Loaded Worlds (" + worldCount + "): " + worldNames);
             getLogger().info("Players online: " + Bukkit.getOnlinePlayers().size());
-        });
+        } catch (Throwable ignored) {}
 
-        long healthHours = getConfig().getLong("serverHealthHours", 24L);
-        if (healthHours > 0) {
-            long periodTicks = Math.max(1L, healthHours) * 3600L * 20L;
-            String webhook = getConfig().getString("discord-webhook-url", "");
-            Bukkit.getScheduler().runTaskTimerAsynchronously(getPlugin(), () -> {
-                try {
-                    long now = System.currentTimeMillis();
-                    long uptimeMs = now - pluginStartTimeMs;
-                    long uptimeSec = uptimeMs / 1000L;
-                    long days = uptimeSec / 86400L;
-                    long hours = (uptimeSec % 86400L) / 3600L;
-                    long mins = (uptimeSec % 3600L) / 60L;
-
-                    Runtime rt = Runtime.getRuntime();
-                    long usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024L * 1024L);
-                    long totalMb = rt.totalMemory() / (1024L * 1024L);
-                    int playersOnline = Bukkit.getOnlinePlayers().size();
-                    int maxPlayers = Bukkit.getMaxPlayers();
-                    int worldCountNow = Bukkit.getWorlds().size();
-                    String worldList = Bukkit.getWorlds().stream().map(World::getName).collect(Collectors.joining(", "));
-
-                    StringBuilder reason = new StringBuilder();
-                    reason.append("Server Health Report\n");
-                    reason.append("Uptime: ").append(days).append("d ").append(hours).append("h ").append(mins).append("m\n");
-                    reason.append("Players: ").append(playersOnline).append("/").append(maxPlayers).append("\n");
-                    reason.append("Memory: ").append(usedMb).append("MB / ").append(totalMb).append("MB\n");
-                    reason.append("Loaded worlds (" + worldCountNow + "): ").append(worldList).append("\n");
-                    reason.append("Java: ").append(System.getProperty("java.version")).append(" (").append(System.getProperty("java.vendor")).append(")");
-
-                    DiscordBukkit.sendReportAsync(getPlugin(), webhook, "Server", "Axior", reason.toString(), System.currentTimeMillis());
-                } catch (Exception ex) {
-                    getLogger().warning("Failed to send server health report: " + ex.getMessage());
-                }
-            }, 20L, periodTicks);
+        try {
+            VersionCheckerFolia.check(getPlugin(), getDescription().getVersion());
+        } catch (Throwable t) {
+            getLogger().warning("VersionCheckerFolia failed: " + t.getMessage());
         }
+
+        try {
+            PermissionsFolia.init(getPlugin());
+        } catch (Throwable t) {
+            getLogger().warning("PermissionsFolia.init() retry failed: " + t.getMessage());
+        }
+        try {
+                if (!PermissionsFolia.isAvailable()) {
+                getLogger().severe("FoliaPerms not detected — some Folia-specific features will be disabled. Plugin will remain enabled.");
+            }
+        } catch (Throwable t) {
+            getLogger().warning("Error while re-checking FoliaPerms availability: " + t.getMessage());
+        }
+
+        try {
+            long healthHours = getConfig().getLong("serverHealthHours", 24L);
+            if (healthHours > 0) {
+                long periodTicks = Math.max(1L, healthHours) * 3600L * 20L;
+                String webhook = getConfig().getString("discord-webhook-url", "");
+                try {
+                    Runnable reportTask = () -> {
+                        try {
+                            long now = System.currentTimeMillis();
+                            long uptimeMs = now - pluginStartTimeMs;
+                            long uptimeSec = uptimeMs / 1000L;
+                            long days = uptimeSec / 86400L;
+                            long hours = (uptimeSec % 86400L) / 3600L;
+                            long mins = (uptimeSec % 3600L) / 60L;
+
+                            Runtime rt = Runtime.getRuntime();
+                            long usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024L * 1024L);
+                            long totalMb = rt.totalMemory() / (1024L * 1024L);
+                            int playersOnline = Bukkit.getOnlinePlayers().size();
+                            int maxPlayers = Bukkit.getMaxPlayers();
+                            int worldCountNow = Bukkit.getWorlds().size();
+                            String worldList = Bukkit.getWorlds().stream().map(World::getName).collect(Collectors.joining(", "));
+
+                            StringBuilder reason = new StringBuilder();
+                            reason.append("Server Health Report\n");
+                            reason.append("Uptime: ").append(days).append("d ").append(hours).append("h ").append(mins).append("m\n");
+                            reason.append("Players: ").append(playersOnline).append("/").append(maxPlayers).append("\n");
+                            reason.append("Memory: ").append(usedMb).append("MB / ").append(totalMb).append("MB\n");
+                            reason.append("Loaded worlds (" + worldCountNow + "): ").append(worldList).append("\n");
+                            reason.append("Java: ").append(System.getProperty("java.version")).append(" (").append(System.getProperty("java.vendor")).append(")");
+
+                            DiscordFolia.sendReportAsync(getPlugin(), webhook, "Server", "Axior", reason.toString(), System.currentTimeMillis());
+                        } catch (Exception ex) {
+                            getLogger().warning("Failed to send server health report: " + ex.getMessage());
+                        }
+                    };
+
+                    if (FoliaScheduler.isAvailable(getPlugin())) {
+                        runTaskTimerAsync(getPlugin(), reportTask, 20L, periodTicks);
+                    } else {
+                        getLogger().severe("Folia RegionScheduler not available — skipping scheduling of server health reports. Plugin will remain enabled.");
+                    }
+                } catch (Throwable t) {
+                    getLogger().warning("Failed to schedule health reports: " + t.getMessage());
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     public void onDisable() {
@@ -315,20 +533,25 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
 
 
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                Set<String> s = detectedClients.get(p.getUniqueId());
-                String playerName = p.getName();
-                if (s == null || s.isEmpty()) {
-                    getLogger().info(playerName + " client: unknown (likely vanilla or not reporting)");
-                } else {
-                    synchronized (s) {
-                        getLogger().info(playerName + " detected client(s): " + String.join(", ", s));
-                    }
+        Runnable joinInspect = () -> {
+            Set<String> s = detectedClients.get(p.getUniqueId());
+            String playerName = p.getName();
+            if (s == null || s.isEmpty()) {
+                getLogger().info(playerName + " client: unknown (likely vanilla or not reporting)");
+            } else {
+                synchronized (s) {
+                    getLogger().info(playerName + " detected client(s): " + String.join(", ", s));
                 }
             }
-        }.runTaskLater(getPlugin(), 60L);
+        };
+
+        try {
+            runTaskLater(getPlugin(), joinInspect, 60L);
+        } catch (Throwable t) {
+            try {
+                getLogger().severe("Folia scheduler failed in onPlayerJoin: " + t.getMessage());
+            } catch (Throwable ignored) {}
+        }
         handleVanishVisibilityForJoining(p);
         checkAltsOnJoin(p);
     }
@@ -424,21 +647,21 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                             try {
                                 if (pat.matcher(normalized).find()) {
                                     event.setCancelled(true);
-                                    try {
-                                        final UUID offenderId = p.getUniqueId();
-                                        final String offenderName = p.getName();
-                                        Bukkit.getScheduler().runTask(getPlugin(), () -> {
-                                            try { getLogger().warning(offenderName + " attempted to send a message that matched a banned word. Message blocked."); } catch (Exception ignored) {}
+                                        try {
+                                            final UUID offenderId = p.getUniqueId();
+                                            final String offenderName = p.getName();
+                                            runTask(getPlugin(), () -> {
+                                                try { getLogger().warning(offenderName + " attempted to send a message that matched a banned word. Message blocked."); } catch (Exception ignored) {}
 
-                                            for (Player admin : Bukkit.getOnlinePlayers()) {
-                                                try { if (admin != null && (admin.hasPermission("axior.mod") || admin.hasPermission("axior.admin") || admin.hasPermission("axior.owner"))) admin.sendMessage(ChatColor.RED + offenderName + " has said a banned word! Take action if needed."); } catch (Exception ignored) {}
-                                            }
+                                                for (Player admin : Bukkit.getOnlinePlayers()) {
+                                                    try { if (admin != null && (admin.hasPermission("axior.mod") || admin.hasPermission("axior.admin") || admin.hasPermission("axior.owner"))) admin.sendMessage(ChatColor.RED + offenderName + " has said a banned word! Take action if needed."); } catch (Exception ignored) {}
+                                                }
 
-                                            try { Player off = Bukkit.getPlayer(offenderId); if (off != null && off.isOnline()) off.sendMessage(ChatColor.RED + "Your message was blocked for containing a banned word."); } catch (Exception ignored) {}
+                                                try { Player off = Bukkit.getPlayer(offenderId); if (off != null && off.isOnline()) off.sendMessage(ChatColor.RED + "Your message was blocked for containing a banned word."); } catch (Exception ignored) {}
 
-                                            try { Bukkit.getScheduler().runTaskLater(getPlugin(), () -> { try { Player off2 = Bukkit.getPlayer(offenderId); if (off2 != null && off2.isOnline()) off2.sendMessage(ChatColor.RED + "Reminder: your previous message was blocked. Avoid banned words."); } catch (Exception ignored) {} }, 100L); } catch (Exception ignored) {}
-                                        });
-                                    } catch (Exception ignored) {}
+                                                try { runTaskLater(getPlugin(), () -> { try { Player off2 = Bukkit.getPlayer(offenderId); if (off2 != null && off2.isOnline()) off2.sendMessage(ChatColor.RED + "Reminder: your previous message was blocked. Avoid banned words."); } catch (Exception ignored) {} }, 100L); } catch (Exception ignored) {}
+                                            });
+                                        } catch (Exception ignored) {}
                                     return;
                                 }
                             } catch (Exception ignored) {}
@@ -814,8 +1037,11 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 invinciblePlayers.add(id);
                 Player p = Bukkit.getPlayer(id);
                 if (p != null && p.isOnline()) {
-                        PotionEffect resistanceEffect = new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 255, true, false);
-                        p.addPotionEffect(resistanceEffect, true);
+                        PotionEffectType resistanceType = PotionEffectType.getByName("RESISTANCE");
+                        if (resistanceType != null) {
+                            PotionEffect resistanceEffect = new PotionEffect(resistanceType, Integer.MAX_VALUE, 255, true, false);
+                            p.addPotionEffect(resistanceEffect, true);
+                        }
                         try {
                             PotionEffect saturationEffect = new PotionEffect(PotionEffectType.SATURATION, Integer.MAX_VALUE, 255, true, false);
                             p.addPotionEffect(saturationEffect, true);
@@ -1106,8 +1332,11 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             if (sub.equals("on") || sub.equals("true")) { 
                 boolean added = invinciblePlayers.add(p.getUniqueId()); 
                 try { 
-                    PotionEffect resistanceEffect = new PotionEffect(PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 255, true, false); 
-                    p.addPotionEffect(resistanceEffect, true); 
+                    PotionEffectType resistanceType = PotionEffectType.getByName("RESISTANCE");
+                    if (resistanceType != null) {
+                        PotionEffect resistanceEffect = new PotionEffect(resistanceType, Integer.MAX_VALUE, 255, true, false); 
+                        p.addPotionEffect(resistanceEffect, true);
+                    } 
                 } catch (Exception ignored) { 
                     p.sendMessage(ChatColor.RED + "Error applying potion effect."); 
                 } 
@@ -1125,7 +1354,10 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             } else if (sub.equals("off") || sub.equals("false")) {
                 boolean removed = invinciblePlayers.remove(p.getUniqueId());
                 try {
-                    p.removePotionEffect(PotionEffectType.RESISTANCE);
+                    PotionEffectType resistanceType = PotionEffectType.getByName("RESISTANCE");
+                    if (resistanceType != null) {
+                        p.removePotionEffect(resistanceType);
+                    }
                 } catch (Exception ignored) {}
                 try {
                     p.removePotionEffect(PotionEffectType.SATURATION);
@@ -1257,7 +1489,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
                 try {
                     String webhook = getConfig().getString("discord-webhook-url", "");
-                    DiscordBukkit.sendReportAsync(getPlugin(), webhook, nameToBan, sender.getName(), "Banned (name) - " + reason, System.currentTimeMillis());
+                    DiscordFolia.sendReportAsync(getPlugin(), webhook, nameToBan, sender.getName(), "Banned (name) - " + reason, System.currentTimeMillis());
                 } catch (Exception e) {
                     getLogger().warning("Failed to dispatch Discord webhook for ban: " + e.getMessage());
                 }
@@ -1290,7 +1522,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
                 try {
                     String webhook = getConfig().getString("discord-webhook-url", "");
-                    DiscordBukkit.sendReportAsync(getPlugin(), webhook, ipAddress + " (player: " + targetName + ")", sender.getName(), "Banned (ip) - " + reason, System.currentTimeMillis());
+                    DiscordFolia.sendReportAsync(getPlugin(), webhook, ipAddress + " (player: " + targetName + ")", sender.getName(), "Banned (ip) - " + reason, System.currentTimeMillis());
                 } catch (Exception e) {
                     getLogger().warning("Failed to dispatch Discord webhook for ip ban: " + e.getMessage());
                 }
@@ -1345,10 +1577,10 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 try {
                     String webhook = getConfig().getString("discord-webhook-url", "");
                     if (namePardoned) {
-                        DiscordBukkit.sendReportAsync(getPlugin(), webhook, target.getName(), sender.getName(), "Pardoned (name)", System.currentTimeMillis());
+                        DiscordFolia.sendReportAsync(getPlugin(), webhook, target.getName(), sender.getName(), "Pardoned (name)", System.currentTimeMillis());
                     }
                     if (ipPardoned) {
-                        DiscordBukkit.sendReportAsync(getPlugin(), webhook, targetName + " (IP pardoned)", sender.getName(), "Pardoned (ip)", System.currentTimeMillis());
+                        DiscordFolia.sendReportAsync(getPlugin(), webhook, targetName + " (IP pardoned)", sender.getName(), "Pardoned (ip)", System.currentTimeMillis());
                     }
                 } catch (Exception e) {
                     getLogger().warning("Failed to dispatch Discord webhook for pardon: " + e.getMessage());
@@ -1371,7 +1603,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             }
             final CommandSender cs = sender;
             final long start = System.nanoTime();
-            Bukkit.getScheduler().runTaskLater(getPlugin(), () -> {
+            runTaskLater(getPlugin(), () -> {
                 try {
                     long elapsed = (System.nanoTime() - start) / 1_000_000L;
                     cs.sendMessage(ChatColor.GREEN + "Pong! Response time: " + elapsed + " ms");
@@ -1649,7 +1881,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
             try {
                 String webhook = getConfig().getString("discord-webhook-url", "");
-                DiscordBukkit.sendReportAsync(getPlugin(), webhook, nameToUse, sender.getName(), "Warned - " + reason, System.currentTimeMillis());
+                DiscordFolia.sendReportAsync(getPlugin(), webhook, nameToUse, sender.getName(), "Warned - " + reason, System.currentTimeMillis());
             } catch (Exception e) {
                 getLogger().warning("Failed to dispatch Discord webhook for warn: " + e.getMessage());
             }
@@ -1659,14 +1891,14 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 try {
                     BanList nameList = Bukkit.getBanList(BanList.Type.NAME);
                     String banReason = "Auto-banned after " + newCount + " warnings. Reason: " + reason;
-                    nameList.addBan(nameToUse, banReason, (java.time.Instant) null, "Axior-Auto");
+                    nameList.addBan(nameToUse, banReason, (Date) null, "Axior-Auto");
                     if (online != null) {
                         online.kickPlayer(ChatColor.RED + "You have been banned: " + banReason);
                     }
                     getLogger().info("[AutoBan] " + nameToUse + " auto-banned after " + newCount + " warnings.");
                     try {
                         String webhook = getConfig().getString("discord-webhook-url", "");
-                        DiscordBukkit.sendReportAsync(getPlugin(), webhook, nameToUse, "Axior-Auto", "Banned (auto) - " + reason, System.currentTimeMillis());
+                        DiscordFolia.sendReportAsync(getPlugin(), webhook, nameToUse, "Axior-Auto", "Banned (auto) - " + reason, System.currentTimeMillis());
                     } catch (Exception ex) {
                         getLogger().warning("Failed to dispatch Discord webhook for auto-ban: " + ex.getMessage());
                     }
@@ -1745,7 +1977,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
                     try {
                         String webhook = getConfig().getString("discord-webhook-url", "");
-                        DiscordBukkit.sendReportAsync(getPlugin(), webhook, targetName, sender.getName(), reason, ts);
+                        DiscordFolia.sendReportAsync(getPlugin(), webhook, targetName, sender.getName(), reason, ts);
                     } catch (Exception e) {
                         getLogger().warning("Failed to dispatch Discord webhook task: " + e.getMessage());
                     }
@@ -1831,7 +2063,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
             try {
                 String webhook = getConfig().getString("discord-webhook-url", "");
-                DiscordBukkit.sendReportAsync(getPlugin(), webhook, targetName, sender.getName(), "Muted " + timeDescLog + " - " + reason, System.currentTimeMillis());
+                DiscordFolia.sendReportAsync(getPlugin(), webhook, targetName, sender.getName(), "Muted " + timeDescLog + " - " + reason, System.currentTimeMillis());
             } catch (Exception e) {
                 getLogger().warning("Failed to dispatch Discord webhook for mute: " + e.getMessage());
             }
@@ -1872,7 +2104,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
             try {
                 String webhook = getConfig().getString("discord-webhook-url", "");
-                DiscordBukkit.sendReportAsync(getPlugin(), webhook, targetName, sender.getName(), "Unmuted", System.currentTimeMillis());
+                DiscordFolia.sendReportAsync(getPlugin(), webhook, targetName, sender.getName(), "Unmuted", System.currentTimeMillis());
             } catch (Exception e) {
                 getLogger().warning("Failed to dispatch Discord webhook for unmute: " + e.getMessage());
             }
@@ -3369,8 +3601,6 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
                     if (floor.isLiquid() || bFeet.isLiquid() || bHead.isLiquid()) continue;
 
-                    if (floor.getType() == Material.POWDER_SNOW || bFeet.getType() == Material.POWDER_SNOW || bHead.getType() == Material.POWDER_SNOW) continue;
-
                     if (floor.getType().name().contains("LEAVES")) continue;
 
                     if (!floor.getType().isSolid()) continue;
@@ -3401,7 +3631,6 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                             org.bukkit.block.Block nbFeet = w.getBlockAt(x + nx, y, z + nz);
                             if (nbFloor.isLiquid() || nbFeet.isLiquid()) { nearbyBad = true; break; }
                             if (dangerous.contains(nbFloor.getType())) { nearbyBad = true; break; }
-                            if (nbFloor.getType() == Material.POWDER_SNOW) { nearbyBad = true; break; }
                             if (nbFloor.getType().name().contains("LEAVES")) { nearbyBad = true; break; }
                         }
                     }

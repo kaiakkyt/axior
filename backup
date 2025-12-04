@@ -4,11 +4,15 @@ plugins {
 }
 
 group = 'kaiakk'
-version = '2.00.0'
-def targetJavaVersion = 21
+version = '2.10.0'
+def targetJavaVersion = 8
 
 repositories {
     mavenCentral()
+    maven {
+        name = "spigotmc-repo"
+        url = "https://hub.spigotmc.org/nexus/service/rest/repository/browse/snapshots/org/spigotmc/spigot-api/"
+    }
     maven {
         name = "papermc-repo"
         url = "https://repo.papermc.io/repository/maven-public/"
@@ -20,12 +24,21 @@ repositories {
 }
 
 sourceSets {
-    bukkitFolia {
+    bukkit {
         java {
-            srcDirs = ['bukkit-folia/main/java']
+            srcDirs = ['bukkit/main/java']
         }
         resources {
-            srcDirs = ['bukkit-folia/main/resources']
+            srcDirs = ['bukkit/main/resources']
+        }
+    }
+
+    folia {
+        java {
+            srcDirs = ['folia/main/java']
+        }
+        resources {
+            srcDirs = ['folia/main/resources']
         }
     }
 
@@ -49,9 +62,13 @@ sourceSets {
 }
 
 configurations {
-    bukkitFoliaCompileOnly.extendsFrom compileOnly
-    bukkitFoliaImplementation.extendsFrom implementation
-    bukkitFoliaRuntimeClasspath.extendsFrom runtimeClasspath
+    bukkitCompileOnly.extendsFrom compileOnly
+    bukkitImplementation.extendsFrom implementation
+    bukkitRuntimeClasspath.extendsFrom runtimeClasspath
+
+    foliaCompileOnly.extendsFrom compileOnly
+    foliaImplementation.extendsFrom implementation
+    foliaRuntimeClasspath.extendsFrom runtimeClasspath
 
     bungeeWaterfallCompileOnly.extendsFrom compileOnly
     bungeeWaterfallImplementation.extendsFrom implementation
@@ -64,12 +81,16 @@ configurations {
 }
 
 dependencies {
-    add('bukkitFoliaCompileOnly', 'io.papermc.paper:paper-api:1.21-R0.1-SNAPSHOT')
-    add('bukkitFoliaCompileOnly', 'net.kyori:adventure-api:4.14.0')
-    add('bukkitFoliaCompileOnly', 'net.kyori:adventure-platform-bukkit:4.2.0')
+    add('bukkitCompileOnly', 'org.spigotmc:spigot-api:1.16.5-R0.1-SNAPSHOT')
 
-    add('bungeeWaterfallCompileOnly', 'net.md-5:bungeecord-api:1.20-R0.2')
+    add('foliaCompileOnly', 'dev.folia:folia-api:1.20.1-R0.1-SNAPSHOT')
+    add('foliaCompileOnly', 'net.kyori:adventure-api:4.14.0')
+    add('foliaCompileOnly', 'net.kyori:adventure-platform-bukkit:4.2.0')
 
+    add('bungeeWaterfallCompileOnly', 'net.md-5:bungeecord-api:1.16-R0.3') {
+        exclude group: 'net.md-5', module: 'brigadier'
+    }
+    
     add('velocityCompileOnly', 'com.velocitypowered:velocity-api:3.3.0-SNAPSHOT')
     add('velocityAnnotationProcessor', 'com.velocitypowered:velocity-api:3.3.0-SNAPSHOT')
     add('velocityImplementation', 'org.yaml:snakeyaml:2.0')
@@ -82,14 +103,23 @@ java {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
-    options.release.set(targetJavaVersion)
+    if (name.contains('Folia')) {
+        options.release.set(17)
+    } else {
+        options.release.set(targetJavaVersion)
+    }
 }
 
 tasks.named('compileVelocityJava', JavaCompile) {
     options.release.set(17)
 }
 
-tasks.named('processBukkitFoliaResources', ProcessResources) {
+tasks.named('processBukkitResources', ProcessResources) {
+    expand(version: version)
+    filteringCharset = 'UTF-8'
+}
+
+tasks.named('processFoliaResources', ProcessResources) {
     expand(version: version)
     filteringCharset = 'UTF-8'
 }
@@ -107,12 +137,22 @@ tasks.named('processVelocityResources', ProcessResources) {
 def baseName = 'Axior'
 
 tasks.register('shadowBukkitJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    dependsOn 'compileBukkitFoliaJava', 'processBukkitFoliaResources'
+    dependsOn 'compileBukkitJava', 'processBukkitResources'
     archiveBaseName.set("${baseName}-Bukkit")
     archiveClassifier.set('')
     archiveVersion.set(version)
-    from sourceSets.bukkitFolia.output
-    configurations = [project.configurations.bukkitFoliaRuntimeClasspath]
+    from sourceSets.bukkit.output
+    configurations = [project.configurations.bukkitRuntimeClasspath]
+    mergeServiceFiles()
+}
+
+tasks.register('shadowFoliaJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    dependsOn 'compileFoliaJava', 'processFoliaResources'
+    archiveBaseName.set("${baseName}-Folia")
+    archiveClassifier.set('')
+    archiveVersion.set(version)
+    from sourceSets.folia.output
+    configurations = [project.configurations.foliaRuntimeClasspath]
     mergeServiceFiles()
 }
 
@@ -138,7 +178,7 @@ tasks.register('shadowVelocityJar', com.github.jengelman.gradle.plugins.shadow.t
 }
 
 tasks.build {
-    dependsOn shadowBukkitJar, shadowBungeeJar, shadowVelocityJar
+    dependsOn shadowBukkitJar, shadowFoliaJar, shadowBungeeJar, shadowVelocityJar
 }
 
 jar.enabled = false

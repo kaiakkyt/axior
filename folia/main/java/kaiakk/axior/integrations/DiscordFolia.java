@@ -2,7 +2,6 @@ package kaiakk.axior.integrations;
 
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
-import io.papermc.paper.threadedregions.scheduler.AsyncScheduler;
 
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -20,9 +19,23 @@ public class DiscordFolia {
 			return;
 		}
 
-        AsyncScheduler scheduler = Bukkit.getAsyncScheduler();
+		try {
+			Object asyncScheduler = null;
+			try {
+				java.lang.reflect.Method getAsyncScheduler = Bukkit.class.getMethod("getAsyncScheduler");
+				asyncScheduler = getAsyncScheduler.invoke(Bukkit.getServer());
+			} catch (Exception e) {
+				plugin.getLogger().warning("Failed to get AsyncScheduler: " + e.getMessage());
+				return;
+			}
 
-		scheduler.runNow(plugin, (task) -> { 
+			if (asyncScheduler == null) {
+				plugin.getLogger().warning("AsyncScheduler is null, cannot send Discord webhook");
+				return;
+			}
+
+			java.lang.reflect.Method runNow = asyncScheduler.getClass().getMethod("runNow", org.bukkit.plugin.Plugin.class, java.util.function.Consumer.class);
+			runNow.invoke(asyncScheduler, plugin, (java.util.function.Consumer<Object>) task -> { 
 			HttpURLConnection conn = null;
 
 			try {
@@ -138,6 +151,9 @@ public class DiscordFolia {
 				if (conn != null) conn.disconnect();
 			}
 		});
+		} catch (Exception ex) {
+			plugin.getLogger().warning("Failed to schedule Discord webhook task: " + ex.getMessage());
+		}
 	}
 
 	private static String jsonEscape(String s) {

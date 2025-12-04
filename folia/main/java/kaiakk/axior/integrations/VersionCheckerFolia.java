@@ -21,7 +21,22 @@ public class VersionCheckerFolia {
 	public static void check(JavaPlugin plugin, String currentVersion) {
 		if (plugin == null) return;
 		try {
-			Bukkit.getAsyncScheduler().runNow(plugin, task -> {
+			Object asyncScheduler = null;
+			try {
+				java.lang.reflect.Method getAsyncScheduler = Bukkit.class.getMethod("getAsyncScheduler");
+				asyncScheduler = getAsyncScheduler.invoke(Bukkit.getServer());
+			} catch (Exception e) {
+				plugin.getLogger().warning("Failed to get AsyncScheduler: " + e.getMessage());
+				return;
+			}
+
+			if (asyncScheduler == null) {
+				plugin.getLogger().warning("AsyncScheduler is null, cannot run version check");
+				return;
+			}
+
+			java.lang.reflect.Method runNow = asyncScheduler.getClass().getMethod("runNow", org.bukkit.plugin.Plugin.class, java.util.function.Consumer.class);
+			runNow.invoke(asyncScheduler, plugin, (java.util.function.Consumer<Object>) task -> {
 				try {
 					String latest = fetchLatestVersion();
 					if (latest == null) {
