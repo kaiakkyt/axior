@@ -1,5 +1,5 @@
 name: Axior
-version: '1.00.0'
+version: '1.01.0'
 main: kaiakk.axior.Axior
 api-version: '1.13'
 authors: [ KaiakK ]
@@ -7,7 +7,7 @@ description: A plugin that updates Minecraft operator tools, brings new systems 
 website: https://modrinth.com/plugin/axior
 folia-supported: true
 load: STARTUP
-softdepend: [ LuckPerms, FoliaPerms ] # to get permissions to work properly
+softdepend: [ LuckPerms ] # to get permissions to work properly
 
 commands:
   # axior.general / basic commands available to all players

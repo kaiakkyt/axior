@@ -31,7 +31,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-@Plugin(id = "axior", name = "Axior", version = "1.00.0", description = "A plugin that updates Minecraft operator tools, brings new systems and helps finding info in console on startup!", url = "https://modrinth.com/plugin/axior", authors = {"KaiakK"})
+@Plugin(id = "axior", name = "Axior", version = "1.01.1", description = "A plugin that updates Minecraft operator tools, brings new systems and helps finding info in console on startup!", url = "https://modrinth.com/plugin/axior", authors = {"KaiakK"})
 public class Axior {
 
     private final ProxyServer proxy;

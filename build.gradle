@@ -4,60 +4,38 @@ plugins {
 }
 
 group = 'kaiakk'
-version = '1.00.0'
-def targetJavaVersion = 8
+version = '1.01.1'
+def baseName = 'Axior'
 
 repositories {
     mavenCentral()
-    maven {
-        name = "spigotmc-repo"
-        url = "https://hub.spigotmc.org/nexus/service/rest/repository/browse/snapshots/org/spigotmc/spigot-api/"
-    }
-    maven {
-        name = "papermc-repo"
-        url = "https://repo.papermc.io/repository/maven-public/"
-    }
-    maven {
-        name = "sonatype"
-        url = "https://oss.sonatype.org/content/repositories/snapshots"
+    maven { url = "hub.spigotmc.org" }
+    maven { url = "https://repo.papermc.io/repository/maven-public/" }
+    maven { url = "https://oss.sonatype.org/content/repositories/snapshots" }
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
     }
 }
 
 sourceSets {
     bukkit {
-        java {
-            srcDirs = ['bukkit/main/java']
-        }
-        resources {
-            srcDirs = ['bukkit/main/resources']
-        }
+        java.srcDirs = ['bukkit-folia/main/java']
+        resources.srcDirs = ['bukkit-folia/main/resources']
     }
-
     folia {
-        java {
-            srcDirs = ['folia/main/java']
-        }
-        resources {
-            srcDirs = ['folia/main/resources']
-        }
+        java.srcDirs = ['bukkit-folia/main/java']
+        resources.srcDirs = ['bukkit-folia/main/resources']
     }
-
     bungeeWaterfall {
-        java {
-            srcDirs = ['bungeecord-waterfall/main/java']
-        }
-        resources {
-            srcDirs = ['bungeecord-waterfall/main/resources']
-        }
+        java.srcDirs = ['bungeecord-waterfall/main/java']
+        resources.srcDirs = ['bungeecord-waterfall/main/resources']
     }
-
     velocity {
-        java {
-            srcDirs = ['velocity/main/java']
-        }
-        resources {
-            srcDirs = ['velocity/main/templates', 'velocity/main/resources']
-        }
+        java.srcDirs = ['velocity/main/java']
+        resources.srcDirs = ['velocity/main/templates', 'velocity/main/resources']
     }
 }
 
@@ -82,10 +60,12 @@ configurations {
 
 dependencies {
     add('bukkitCompileOnly', 'org.spigotmc:spigot-api:1.16.5-R0.1-SNAPSHOT')
-
+    add('bukkitImplementation', files('dependencies/Multimedia-1.10.1.jar'))
+    
     add('foliaCompileOnly', 'dev.folia:folia-api:1.20.1-R0.1-SNAPSHOT')
     add('foliaCompileOnly', 'net.kyori:adventure-api:4.14.0')
     add('foliaCompileOnly', 'net.kyori:adventure-platform-bukkit:4.2.0')
+    add('foliaImplementation', files('dependencies/Multimedia-1.10.1.jar'))
 
     add('bungeeWaterfallCompileOnly', 'net.md-5:bungeecord-api:1.16-R0.3') {
         exclude group: 'net.md-5', module: 'brigadier'
@@ -96,92 +76,57 @@ dependencies {
     add('velocityImplementation', 'org.yaml:snakeyaml:2.0')
 }
 
-java {
-    sourceCompatibility = JavaVersion.toVersion(targetJavaVersion)
-    targetCompatibility = JavaVersion.toVersion(targetJavaVersion)
-}
-
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
-    if (name.contains('Folia')) {
+    if (name.contains('Folia') || name.contains('Velocity')) {
         options.release.set(17)
     } else {
-        options.release.set(targetJavaVersion)
+        options.release.set(8)
     }
 }
 
-tasks.named('compileVelocityJava', JavaCompile) {
-    options.release.set(17)
+[processBukkitResources, processFoliaResources, processBungeeWaterfallResources, processVelocityResources].each { task ->
+    task.configure {
+        expand(version: version)
+        filteringCharset = 'UTF-8'
+        duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    }
 }
-
-tasks.named('processBukkitResources', ProcessResources) {
-    expand(version: version)
-    filteringCharset = 'UTF-8'
-}
-
-tasks.named('processFoliaResources', ProcessResources) {
-    expand(version: version)
-    filteringCharset = 'UTF-8'
-}
-
-tasks.named('processBungeeWaterfallResources', ProcessResources) {
-    expand(version: version)
-    filteringCharset = 'UTF-8'
-}
-
-tasks.named('processVelocityResources', ProcessResources) {
-    expand(version: version)
-    filteringCharset = 'UTF-8'
-}
-
-def baseName = 'Axior'
 
 tasks.register('shadowBukkitJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    dependsOn 'compileBukkitJava', 'processBukkitResources'
-    archiveBaseName.set("${baseName}-Bukkit")
-    archiveClassifier.set('')
-    archiveVersion.set(version)
     from sourceSets.bukkit.output
     configurations = [project.configurations.bukkitRuntimeClasspath]
-    mergeServiceFiles()
-}
-
-tasks.register('shadowFoliaJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    dependsOn 'compileFoliaJava', 'processFoliaResources'
-    archiveBaseName.set("${baseName}-Folia")
+    archiveBaseName.set("${baseName}-Bukkit-Folia")
     archiveClassifier.set('')
     archiveVersion.set(version)
-    from sourceSets.folia.output
-    configurations = [project.configurations.foliaRuntimeClasspath]
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     mergeServiceFiles()
 }
 
 tasks.register('shadowBungeeJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    dependsOn 'compileBungeeWaterfallJava', 'processBungeeWaterfallResources'
-    archiveBaseName.set("${baseName}-BungeeCord")
-    archiveClassifier.set('')
-    archiveVersion.set(version)
     from sourceSets.bungeeWaterfall.output
     configurations = [project.configurations.bungeeWaterfallRuntimeClasspath]
+    archiveBaseName.set("${baseName}-Bungee")
+    archiveClassifier.set('')
+    archiveVersion.set(version)
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     mergeServiceFiles()
 }
 
 tasks.register('shadowVelocityJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    dependsOn 'compileVelocityJava', 'processVelocityResources'
+    from sourceSets.velocity.output
+    configurations = [project.configurations.velocityRuntimeClasspath]
     archiveBaseName.set("${baseName}-Velocity")
     archiveClassifier.set('')
     archiveVersion.set(version)
-    from sourceSets.velocity.output
-    configurations = [project.configurations.velocityRuntimeClasspath]
     relocate 'org.yaml.snakeyaml', 'kaiakk.axior.libs.snakeyaml'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     mergeServiceFiles()
 }
 
 tasks.build {
-    dependsOn shadowBukkitJar, shadowFoliaJar, shadowBungeeJar, shadowVelocityJar
+    dependsOn shadowBukkitJar, shadowBungeeJar, shadowVelocityJar
 }
 
 jar.enabled = false
-tasks.named('shadowJar').configure {
-    enabled = false
-}
+shadowJar.enabled = false

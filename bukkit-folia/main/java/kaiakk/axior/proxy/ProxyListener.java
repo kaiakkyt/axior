@@ -13,16 +13,22 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.logging.Logger;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.concurrent.CopyOnWriteArrayList;
+import org.bukkit.Bukkit;
+import kaiakk.multimedia.classes.ConsoleLog;
 
 public class ProxyListener implements PluginMessageListener {
     
     private final Plugin plugin;
-    private final Logger logger;
+    private static ProxyListener INSTANCE = null;
+    private static Plugin STATIC_PLUGIN = null;
+    private static final List<String> cachedServers = new CopyOnWriteArrayList<>();
     
     public static final String CHANNEL_BUNGEE = "BungeeCord";
     public static final String CHANNEL_VELOCITY_MODERN = "velocity:main";
@@ -53,32 +59,80 @@ public class ProxyListener implements PluginMessageListener {
     
     public ProxyListener(Plugin plugin) {
         this.plugin = plugin;
-        this.logger = plugin.getLogger();
+    }
+
+    public static void init(Plugin plugin) {
+        if (plugin == null) return;
+        if (INSTANCE != null) return;
+        STATIC_PLUGIN = plugin;
+        INSTANCE = new ProxyListener(plugin);
+        try { INSTANCE.register(); } catch (Throwable t) { ConsoleLog.warn("ProxyListener init failed: " + t.getMessage()); }
+    }
+
+    public static void cleanup() {
+        if (INSTANCE == null) return;
+        try { INSTANCE.unregister(); } catch (Throwable ignored) {}
+        INSTANCE = null;
+        STATIC_PLUGIN = null;
+        cachedServers.clear();
+    }
+
+    public static boolean isBehindProxy() {
+        return INSTANCE != null;
+    }
+
+    public static List<String> getServerList() {
+        return Collections.unmodifiableList(new ArrayList<>(cachedServers));
+    }
+
+    public static void requestServerList() {
+        if (INSTANCE == null) { ConsoleLog.warn("ProxyListener not initialized; cannot request server list"); return; }
+        Player any = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
+        if (any == null) { ConsoleLog.warn("No online player to send proxy request"); return; }
+        INSTANCE.requestServerList(any);
+    }
+
+    public static void forwardToAllServers(Player sender, String subchannel, byte[] data) {
+        if (INSTANCE == null) { ConsoleLog.warn("ProxyListener not initialized; cannot forward"); return; }
+        for (String server : getServerList()) {
+            INSTANCE.forwardToServer(sender, server, subchannel, data);
+        }
+    }
+
+    public static void sendSubchannel(Player sender, String subchannel) {
+        if (sender == null || subchannel == null) return;
+        try {
+            ByteArrayDataOutput out = ByteStreams.newDataOutput();
+            out.writeUTF(subchannel);
+            sender.sendPluginMessage(STATIC_PLUGIN, CHANNEL_BUNGEE, out.toByteArray());
+        } catch (Throwable t) {
+            ConsoleLog.warn("Failed to send subchannel message: " + t.getMessage());
+        }
     }
     
     public void register() {
         try {
             plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, CHANNEL_BUNGEE, this);
             plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, CHANNEL_BUNGEE);
-            logger.info("Registered BungeeCord plugin messaging channel");
+            ConsoleLog.info("Registered BungeeCord plugin messaging channel");
         } catch (Exception e) {
-            logger.warning("Failed to register BungeeCord channel: " + e.getMessage());
+            ConsoleLog.warn("Failed to register BungeeCord channel: " + e.getMessage());
         }
         
         try {
             plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, CHANNEL_VELOCITY_MODERN, this);
             plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, CHANNEL_VELOCITY_MODERN);
-            logger.info("Registered Velocity modern plugin messaging channel");
+            ConsoleLog.info("Registered Velocity modern plugin messaging channel");
         } catch (Exception e) {
-            logger.warning("Failed to register Velocity modern channel: " + e.getMessage());
+            ConsoleLog.warn("Failed to register Velocity modern channel: " + e.getMessage());
         }
         
         try {
             plugin.getServer().getMessenger().registerIncomingPluginChannel(plugin, CHANNEL_VELOCITY_LEGACY, this);
             plugin.getServer().getMessenger().registerOutgoingPluginChannel(plugin, CHANNEL_VELOCITY_LEGACY);
-            logger.info("Registered Velocity legacy plugin messaging channel");
+            ConsoleLog.info("Registered Velocity legacy plugin messaging channel");
         } catch (Exception e) {
-            logger.warning("Failed to register Velocity legacy channel: " + e.getMessage());
+            ConsoleLog.warn("Failed to register Velocity legacy channel: " + e.getMessage());
         }
     }
     
@@ -141,11 +195,11 @@ public class ProxyListener implements PluginMessageListener {
                     handleForwardedMessage(player, in);
                     break;
                 default:
-                    logger.fine("Received unknown BungeeCord subchannel: " + subchannel);
+                    ConsoleLog.info("Received unknown BungeeCord subchannel: " + subchannel);
                     break;
             }
         } catch (Exception e) {
-            logger.warning("Error handling BungeeCord message: " + e.getMessage());
+            ConsoleLog.warn("Error handling BungeeCord message: " + e.getMessage());
         }
     }
     
@@ -154,13 +208,13 @@ public class ProxyListener implements PluginMessageListener {
             DataInputStream in = new DataInputStream(new ByteArrayInputStream(message));
             String subchannel = in.readUTF();
             
-            logger.fine("Received Velocity message on subchannel: " + subchannel);
+            ConsoleLog.info("Received Velocity message on subchannel: " + subchannel);
             
             if (messageCallback != null) {
                 messageCallback.onMessage(player, subchannel, message);
             }
         } catch (Exception e) {
-            logger.warning("Error handling Velocity message: " + e.getMessage());
+            ConsoleLog.warn("Error handling Velocity message: " + e.getMessage());
         }
     }
     
@@ -262,7 +316,7 @@ public class ProxyListener implements PluginMessageListener {
             
             sender.sendPluginMessage(plugin, CHANNEL_BUNGEE, msgBytes.toByteArray());
         } catch (IOException e) {
-            logger.warning("Error forwarding message to server: " + e.getMessage());
+            ConsoleLog.warn("Error forwarding message to server: " + e.getMessage());
         }
     }
     
@@ -278,7 +332,7 @@ public class ProxyListener implements PluginMessageListener {
             
             sender.sendPluginMessage(plugin, CHANNEL_BUNGEE, msgBytes.toByteArray());
         } catch (IOException e) {
-            logger.warning("Error forwarding message to player: " + e.getMessage());
+            ConsoleLog.warn("Error forwarding message to player: " + e.getMessage());
         }
     }
     
@@ -287,14 +341,14 @@ public class ProxyListener implements PluginMessageListener {
         String ip = in.readUTF();
         int port = in.readInt();
         playerIPs.put(player.getUniqueId(), ip + ":" + port);
-        logger.fine("Received IP for " + player.getName() + ": " + ip + ":" + port);
+        ConsoleLog.info("Received IP for " + player.getName() + ": " + ip + ":" + port);
     }
     
     private void handlePlayerCountResponse(ByteArrayDataInput in) {
         String serverName = in.readUTF();
         int playerCount = in.readInt();
         serverPlayerCounts.put(serverName, playerCount);
-        logger.fine("Received player count for " + serverName + ": " + playerCount);
+        ConsoleLog.info("Received player count for " + serverName + ": " + playerCount);
     }
     
     private void handlePlayerListResponse(ByteArrayDataInput in) {
@@ -302,17 +356,26 @@ public class ProxyListener implements PluginMessageListener {
         String playerListStr = in.readUTF();
         String[] players = playerListStr.split(", ");
         serverPlayerLists.put(serverName, players);
-        logger.fine("Received player list for " + serverName + ": " + playerListStr);
+        ConsoleLog.info("Received player list for " + serverName + ": " + playerListStr);
     }
     
     private void handleGetServersResponse(ByteArrayDataInput in) {
         String serverListStr = in.readUTF();
-        logger.info("Network servers: " + serverListStr);
+        ConsoleLog.info("Network servers: " + serverListStr);
+        try {
+            String[] parts = serverListStr.split("\\s*,\\s*");
+            cachedServers.clear();
+            for (String s : parts) {
+                if (s == null) continue;
+                String t = s.trim();
+                if (!t.isEmpty()) cachedServers.add(t);
+            }
+        } catch (Throwable ignored) {}
     }
     
     private void handleGetServerResponse(ByteArrayDataInput in) {
         String serverName = in.readUTF();
-        logger.fine("Current server: " + serverName);
+        ConsoleLog.info("Current server: " + serverName);
     }
     
     private void handleUUIDResponse(ByteArrayDataInput in) {
@@ -321,9 +384,9 @@ public class ProxyListener implements PluginMessageListener {
         try {
             UUID uuid = UUID.fromString(uuidString);
             playerUUIDs.put(UUID.nameUUIDFromBytes(playerName.getBytes()), uuid);
-            logger.fine("Received UUID for " + playerName + ": " + uuid);
+            ConsoleLog.info("Received UUID for " + playerName + ": " + uuid);
         } catch (IllegalArgumentException e) {
-            logger.warning("Invalid UUID received: " + uuidString);
+            ConsoleLog.warn("Invalid UUID received: " + uuidString);
         }
     }
     
@@ -331,7 +394,7 @@ public class ProxyListener implements PluginMessageListener {
         String serverName = in.readUTF();
         String ip = in.readUTF();
         short port = in.readShort();
-        logger.fine("Received IP for server " + serverName + ": " + ip + ":" + port);
+        ConsoleLog.info("Received IP for server " + serverName + ": " + ip + ":" + port);
     }
     
     private void handleForwardedMessage(Player player, ByteArrayDataInput in) {
@@ -345,7 +408,7 @@ public class ProxyListener implements PluginMessageListener {
                 String subchannel = dataIn.readUTF();
                 messageCallback.onMessage(player, subchannel, data);
             } catch (IOException e) {
-                logger.warning("Error processing forwarded message: " + e.getMessage());
+                ConsoleLog.warn("Error processing forwarded message: " + e.getMessage());
             }
         }
     }

@@ -1,7 +1,8 @@
 package kaiakk.axior.integrations;
 
-import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
+import kaiakk.multimedia.classes.ConsoleLog;
+import kaiakk.multimedia.classes.SchedulerHelper;
 
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -11,31 +12,15 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.time.Instant;
 
-public class DiscordFolia {
+public class DiscordBukkit {
 	public static void sendReportAsync(JavaPlugin plugin, String webhookUrl, String reported, String reporter, String reason, long timestamp) {
 		if (plugin == null) return;
 		if (webhookUrl == null || webhookUrl.isEmpty() || webhookUrl.contains("PASTE_YOUR_WEBHOOK_URL_HERE")) {
-			plugin.getLogger().fine("Discord webhook not configured; skipping webhook send.");
+			ConsoleLog.info("Discord webhook not configured; skipping webhook send.");
 			return;
 		}
 
-		try {
-			Object asyncScheduler = null;
-			try {
-				java.lang.reflect.Method getAsyncScheduler = Bukkit.class.getMethod("getAsyncScheduler");
-				asyncScheduler = getAsyncScheduler.invoke(Bukkit.getServer());
-			} catch (Exception e) {
-				plugin.getLogger().warning("Failed to get AsyncScheduler: " + e.getMessage());
-				return;
-			}
-
-			if (asyncScheduler == null) {
-				plugin.getLogger().warning("AsyncScheduler is null, cannot send Discord webhook");
-				return;
-			}
-
-			java.lang.reflect.Method runNow = asyncScheduler.getClass().getMethod("runNow", org.bukkit.plugin.Plugin.class, java.util.function.Consumer.class);
-			runNow.invoke(asyncScheduler, plugin, (java.util.function.Consumer<Object>) task -> { 
+		SchedulerHelper.runAsync(plugin, () -> {
 			HttpURLConnection conn = null;
 
 			try {
@@ -138,22 +123,19 @@ public class DiscordFolia {
 				int code = conn.getResponseCode();
 
 				if (code == 429) {
-					plugin.getLogger().warning("Discord webhook rate-limited (HTTP 429). Slow down reports.");
+					ConsoleLog.warn("Discord webhook rate-limited (HTTP 429). Slow down reports.");
 				} else if (code >= 200 && code < 300) {
-					plugin.getLogger().fine("Sent report to Discord webhook (HTTP " + code + ")");
+					ConsoleLog.info("Sent report to Discord webhook (HTTP " + code + ")");
 				} else {
-					plugin.getLogger().warning("Discord webhook returned HTTP " + code);
+					ConsoleLog.warn("Discord webhook returned HTTP " + code);
 				}
 
 			} catch (Exception e) {
-				plugin.getLogger().warning("Failed to send Discord webhook: " + e.getMessage());
+				ConsoleLog.warn("Failed to send Discord webhook: " + e.getMessage());
 			} finally {
 				if (conn != null) conn.disconnect();
 			}
 		});
-		} catch (Exception ex) {
-			plugin.getLogger().warning("Failed to schedule Discord webhook task: " + ex.getMessage());
-		}
 	}
 
 	private static String jsonEscape(String s) {

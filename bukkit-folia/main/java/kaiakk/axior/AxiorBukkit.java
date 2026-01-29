@@ -9,12 +9,11 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.server.ServerLoadEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerEditBookEvent;
 import org.bukkit.event.block.SignChangeEvent;
-import org.bukkit.plugin.messaging.PluginMessageListener;
 import org.bukkit.entity.Player;
 import org.bukkit.ChatColor;
 import org.bukkit.GameMode;
@@ -24,8 +23,6 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
 import java.net.InetSocketAddress;
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -59,11 +56,16 @@ import kaiakk.axior.integrations.DiscordBukkit;
 import kaiakk.axior.integrations.WebManagerBukkit;
 import kaiakk.axior.integrations.VersionCheckerBukkit;
 import kaiakk.axior.proxy.ProxyListener;
+import kaiakk.multimedia.classes.ConsoleLog;
+import kaiakk.multimedia.classes.SchedulerHelper;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 
-public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, TabCompleter, Listener, PluginMessageListener, PluginDelegate {
+public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, TabCompleter, Listener, PluginDelegate {
     private final JavaPlugin plugin;
     private WebManagerBukkit webManager;
     private ProxyListener proxyListener;
+    private Method errorHandlerMethod = null;
 
     public AxiorBukkit(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -72,7 +74,6 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
     private JavaPlugin getPlugin() { return this.plugin; }
     private org.bukkit.Server getServer() { return this.plugin.getServer(); }
     private org.bukkit.configuration.file.FileConfiguration getConfig() { return this.plugin.getConfig(); }
-    private java.util.logging.Logger getLogger() { return this.plugin.getLogger(); }
     private void saveDefaultConfig() { this.plugin.saveDefaultConfig(); }
     private void saveConfig() { this.plugin.saveConfig(); }
     private PluginDescriptionFile getDescription() { return this.plugin.getDescription(); }
@@ -91,12 +92,14 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
     private File getDataFolder() { return this.plugin.getDataFolder(); }
 
     public void onEnable() {
+        setupErrorHandler();
+
         webManager = new WebManagerBukkit();
         webManager.init();
 
         proxyListener = new ProxyListener(getPlugin());
         proxyListener.register();
-        getLogger().info("ProxyListener initialized for BungeeCord/Waterfall/Velocity support");
+        ConsoleLog.info("ProxyListener initialized for BungeeCord/Waterfall/Velocity support");
 
         saveDefaultConfig();
 
@@ -108,7 +111,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             try {
                 adminFile.createNewFile();
             } catch (IOException ioe) {
-                getLogger().warning("Failed to create admin.yml: " + ioe.getMessage());
+                ConsoleLog.warn("Failed to create admin.yml: " + ioe.getMessage());
                 adminFile = null;
             }
         }
@@ -132,85 +135,79 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
         getServer().getPluginManager().registerEvents(this, getPlugin());
 
-        String[] channels = new String[] {"minecraft:brand", "fml:handshake", "fml:handshake_tag", "forge:handshake", "fabric:client_brand"};
-        for (String ch : channels) {
-            try {
-                getServer().getMessenger().registerIncomingPluginChannel(getPlugin(), ch, this);
-                getServer().getMessenger().registerOutgoingPluginChannel(getPlugin(), ch);
-            } catch (IllegalArgumentException ignored) {
-            }
-        }
+        try {
+            kaiakk.axior.Clients.initialize(getPlugin());
+        } catch (Throwable ignored) {}
 
-        getLogger().info("Running Axior v" + getDescription().getVersion() + " by " + String.join(", ", getDescription().getAuthors()));
-        getLogger().info("Plugin messaging channels registered: " + Arrays.toString(channels)); 
-        getLogger().info("Jar file name: " + getJarFileName());
-        if (Bukkit.getPluginManager().getPlugin("LuckPerms") != null) {
-            getLogger().info("LuckPerms detected, using LuckPerms permissions API.");
-            getLogger().info("This will change how in-game permissions work, as it is using the LuckPerms system.");
-            getLogger().info("However this does not change anything within Axior itself.");
+        ConsoleLog.info("Running Axior v" + getDescription().getVersion() + " by " + String.join(", ", getDescription().getAuthors()));
+        ConsoleLog.info("Jar file name: " + getJarFileName());
+
+        String serverSoftwareBukkit = Bukkit.getServer().getName().toLowerCase();
+        String serverSoftwareFolia = Bukkit.getServer().getName().toLowerCase();
+        
+        if (serverSoftwareBukkit.contains("bukkit") && Bukkit.getPluginManager().getPlugin("LuckPerms") != null) {
+            ConsoleLog.info("LuckPerms detected, using LuckPerms permissions API.");
+            ConsoleLog.info("This will change how in-game permissions work, as it is using the LuckPerms system.");
+            ConsoleLog.info("However this does not change anything within Axior itself.");
         } else {
-            getLogger().info("LuckPerms not found, using default Bukkit permissions handler.");
-            getLogger().info("Some permissions will not be available unless you download LuckPerms or some type of permissions plugin.");
-            getLogger().info("However if you want a better permission system on your server, consider installing LuckPerms.");
+            ConsoleLog.info("LuckPerms not found, using default Bukkit permissions handler.");
+            ConsoleLog.info("Some permissions will not be available unless you download LuckPerms or some type of permissions plugin.");
+            ConsoleLog.info("However if you want a better permission system on your server, consider installing LuckPerms.");
         }
         
-        for (org.bukkit.plugin.Plugin pl : Bukkit.getPluginManager().getPlugins()) {
-            PluginDescriptionFile desc = pl.getDescription();
-            List<String> authors = desc.getAuthors();
-
-            if (authors == null || !authors.contains("KaiakK")) continue;
-
-            String name = desc.getName();
-
-            if (name != null && name.equalsIgnoreCase(getDescription().getName())) continue;
-
-            String version = desc.getVersion();
-            getLogger().info("Detected one of KaiakK's plugins: " + name + " v" + version + " by " + String.join(", ", authors) + " — Thanks for using my other plugin " + name + "!");
+        if (serverSoftwareFolia.contains("folia") && Bukkit.getPluginManager().getPlugin("FoliaPerms") != null) {
+            ConsoleLog.info("FoliaPerms detected, using FoliaPerms permissions API.");
+            ConsoleLog.info("This will change how in-game permissions work, as it is using the FoliaPerms system.");
+            ConsoleLog.info("However this does not change anything within Axior itself.");
+        } else {
+            ConsoleLog.info("FoliaPerms not found, using default Bukkit permissions handler.");
+            ConsoleLog.info("Some permissions will not be available unless you download FoliaPerms or some type of permissions plugin.");
+            ConsoleLog.info("However if you want a better permission system on your server, consider installing FoliaPerms.");
         }
-
-        getLogger().info("Java runtime: " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor") + ")");
-        getLogger().info("Architecture: " + System.getProperty("os.arch"));
-        getLogger().info("Operating system: " + System.getProperty("os.name") + " " + System.getProperty("os.version"));
         
-        getLogger().info("Bukkit/Server version: " + Bukkit.getVersion() + " " + Bukkit.getBukkitVersion());
-        getLogger().info("Server software: " + Bukkit.getServer().getName());
+        ConsoleLog.info("Java runtime: " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor") + ")");
+        ConsoleLog.info("Architecture: " + System.getProperty("os.arch"));
+        ConsoleLog.info("Operating system: " + System.getProperty("os.name") + " " + System.getProperty("os.version"));
+        
+        ConsoleLog.info("Bukkit/Server version: " + Bukkit.getVersion() + " " + Bukkit.getBukkitVersion());
+        ConsoleLog.info("Server software: " + Bukkit.getServer().getName());
 
         String serverName = Bukkit.getServer().getName().toLowerCase();
         if (serverName.contains("arclight")) {
-            getLogger().warning("This works, but is not fully recommended — Arclight is a hybrid between mods and plugins. Use Paper or Purpur for optimal performance.");
+            ConsoleLog.warn("This works, but is not fully recommended — Arclight is a hybrid between mods and plugins. Use Paper or Purpur for optimal performance.");
         }  else if (serverName.contains("pufferfish") || serverName.contains("leaf")) {
-            getLogger().warning("This works, but is not recommended. Use Paper or Purpur for optimal performance.");
+            ConsoleLog.warn("This works, but is not recommended. Use Paper or Purpur for optimal performance.");
         }
         
-        getLogger().info("Online mode: " + Bukkit.getOnlineMode());
-        getLogger().info("Server port: " + Bukkit.getPort());
-        getLogger().info("Max players configured: " + Bukkit.getMaxPlayers());
+        ConsoleLog.info("Online mode: " + Bukkit.getOnlineMode());
+        ConsoleLog.info("Server port: " + Bukkit.getPort());
+        ConsoleLog.info("Max players configured: " + Bukkit.getMaxPlayers());
 
         long cfgMinutes = getConfig().getLong("reportCooldownMinutes", 5L);
-        getLogger().info("Report cooldown: " + cfgMinutes + " minutes");
-        getLogger().info("Discord webhook url set to " + getConfig().getString("discord-webhook-url", "not available (not configured)"));
+        ConsoleLog.info("Report cooldown: " + cfgMinutes + " minutes");
+        ConsoleLog.info("Discord webhook url set to " + getConfig().getString("discord-webhook-url", "not available (not configured)"));
 
         try {
             VersionCheckerBukkit.check(getPlugin(), getDescription().getVersion());
         } catch (Throwable t) {
-            getLogger().warning("VersionCheckerBukkit failed: " + t.getMessage());
+            ConsoleLog.warn("VersionCheckerBukkit failed: " + t.getMessage());
         }
 
-        Bukkit.getScheduler().runTask(getPlugin(), () -> {
+        SchedulerHelper.run(getPlugin(), () -> {
             int worldCount = Bukkit.getWorlds().size();
             List<String> worldNames = Bukkit.getWorlds().stream()
                     .map(world -> world.getName())
                     .collect(Collectors.toList());
 
-            getLogger().info("Loaded Worlds (" + worldCount + "): " + worldNames);
-            getLogger().info("Players online: " + Bukkit.getOnlinePlayers().size());
+            ConsoleLog.info("Loaded Worlds (" + worldCount + "): " + worldNames);
+            ConsoleLog.info("Players online: " + Bukkit.getOnlinePlayers().size());
         });
 
         long healthHours = getConfig().getLong("serverHealthHours", 24L);
         if (healthHours > 0) {
             long periodTicks = Math.max(1L, healthHours) * 3600L * 20L;
             String webhook = getConfig().getString("discord-webhook-url", "");
-            Bukkit.getScheduler().runTaskTimerAsynchronously(getPlugin(), () -> {
+            SchedulerHelper.runAsyncTimer(getPlugin(), () -> {
                 try {
                     long now = System.currentTimeMillis();
                     long uptimeMs = now - pluginStartTimeMs;
@@ -237,7 +234,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
                     DiscordBukkit.sendReportAsync(getPlugin(), webhook, "Server", "Axior", reason.toString(), System.currentTimeMillis());
                 } catch (Exception ex) {
-                    getLogger().warning("Failed to send server health report: " + ex.getMessage());
+                    ConsoleLog.warn("Failed to send server health report: " + ex.getMessage());
                 }
             }, 20L, periodTicks);
         }
@@ -250,24 +247,23 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             try {
                 webManager.shutdown();
             } catch (Throwable t) {
-                getLogger().warning("WebManager shutdown failed: " + t.getMessage());
+                ConsoleLog.warn("WebManager shutdown failed: " + t.getMessage());
             }
         }
         if (proxyListener != null) {
             try {
                 proxyListener.unregister();
             } catch (Throwable t) {
-                getLogger().warning("ProxyListener shutdown failed: " + t.getMessage());
+                ConsoleLog.warn("ProxyListener shutdown failed: " + t.getMessage());
             }
         }
-        getLogger().info("Plugin disabled.");
-        getLogger().info("Saving all data from config.yml and admin.yml...");
-        getLogger().info("Data saved.");
-        getLogger().info("Exiting...");
-        getLogger().info("Cya!");
+        ConsoleLog.info("Plugin disabled.");
+        ConsoleLog.info("Saving all data from config.yml and admin.yml...");
+        ConsoleLog.info("Data saved.");
+        ConsoleLog.info("Exiting...");
+        ConsoleLog.info("Cya!");
     }
 
-    private final Map<UUID, Set<String>> detectedClients = new HashMap<>();
     private final Map<UUID, Long> muteExpiry = new HashMap<>();
     private final Map<UUID, String> muteReason = new HashMap<>();
     private final Map<UUID, String> muteSetBy = new HashMap<>();
@@ -302,7 +298,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player p = event.getPlayer();
-        detectedClients.computeIfAbsent(p.getUniqueId(), k -> Collections.synchronizedSet(new HashSet<>()));
+        kaiakk.axior.Clients.trackPlayerOnJoin(p);
 
         if (maintenanceMode) {
             try {
@@ -315,22 +311,16 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
 
 
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                Set<String> s = detectedClients.get(p.getUniqueId());
-                String playerName = p.getName();
-                if (s == null || s.isEmpty()) {
-                    getLogger().info(playerName + " client: unknown (likely vanilla or not reporting)");
-                } else {
-                    synchronized (s) {
-                        getLogger().info(playerName + " detected client(s): " + String.join(", ", s));
-                    }
-                }
-            }
-        }.runTaskLater(getPlugin(), 60L);
         handleVanishVisibilityForJoining(p);
         checkAltsOnJoin(p);
+    }
+
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        if (event == null) return;
+        Player p = event.getPlayer();
+        if (p == null) return;
+        kaiakk.axior.Clients.cleanup(p.getUniqueId());
     }
 
     private void checkAltsOnJoin(Player p) {
@@ -343,7 +333,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             try {
                 BanList ipBanList = Bukkit.getBanList(BanList.Type.IP);
                 if (ipBanList != null && ipBanList.isBanned(ip)) {
-                    getLogger().warning("Player '" + p.getName() + "' joined from banned IP " + ip + " — possible alt of a banned account.");
+                    ConsoleLog.warn("Player '" + p.getName() + "' joined from banned IP " + ip + " — possible alt of a banned account.");
                 }
             } catch (Exception ignored) {
             }
@@ -358,7 +348,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                     String otherIp = otherAddr.getAddress().getHostAddress();
                     if (!ip.equals(otherIp)) continue;
                     if (nameBanList != null && nameBanList.isBanned(other.getName())) {
-                        getLogger().warning("Player '" + p.getName() + "' joined from the same IP (" + ip + ") as name-banned account '" + other.getName() + "'. Possible alt.");
+                        ConsoleLog.warn("Player '" + p.getName() + "' joined from the same IP (" + ip + ") as name-banned account '" + other.getName() + "'. Possible alt.");
                     }
                 }
             } catch (Exception ignored) {
@@ -427,8 +417,8 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                                     try {
                                         final UUID offenderId = p.getUniqueId();
                                         final String offenderName = p.getName();
-                                        Bukkit.getScheduler().runTask(getPlugin(), () -> {
-                                            try { getLogger().warning(offenderName + " attempted to send a message that matched a banned word. Message blocked."); } catch (Exception ignored) {}
+                                        SchedulerHelper.run(getPlugin(), () -> {
+                                            try { ConsoleLog.warn(offenderName + " attempted to send a message that matched a banned word. Message blocked."); } catch (Exception ignored) {}
 
                                             for (Player admin : Bukkit.getOnlinePlayers()) {
                                                 try { if (admin != null && (admin.hasPermission("axior.mod") || admin.hasPermission("axior.admin") || admin.hasPermission("axior.owner"))) admin.sendMessage(ChatColor.RED + offenderName + " has said a banned word! Take action if needed."); } catch (Exception ignored) {}
@@ -436,7 +426,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
                                             try { Player off = Bukkit.getPlayer(offenderId); if (off != null && off.isOnline()) off.sendMessage(ChatColor.RED + "Your message was blocked for containing a banned word."); } catch (Exception ignored) {}
 
-                                            try { Bukkit.getScheduler().runTaskLater(getPlugin(), () -> { try { Player off2 = Bukkit.getPlayer(offenderId); if (off2 != null && off2.isOnline()) off2.sendMessage(ChatColor.RED + "Reminder: your previous message was blocked. Avoid banned words."); } catch (Exception ignored) {} }, 100L); } catch (Exception ignored) {}
+                                            try { SchedulerHelper.runLater(getPlugin(), () -> { try { Player off2 = Bukkit.getPlayer(offenderId); if (off2 != null && off2.isOnline()) off2.sendMessage(ChatColor.RED + "Reminder: your previous message was blocked. Avoid banned words."); } catch (Exception ignored) {} }, 100L); } catch (Exception ignored) {}
                                         });
                                     } catch (Exception ignored) {}
                                     return;
@@ -662,7 +652,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             try {
                 adminConfig.save(adminFile);
             } catch (IOException ex) {
-                getLogger().warning("Failed to write default admin.yml: " + ex.getMessage());
+                ConsoleLog.warn("Failed to write default admin.yml: " + ex.getMessage());
             }
         }
     }
@@ -719,7 +709,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
         try {
             adminConfig.save(adminFile);
         } catch (IOException ex) {
-            getLogger().warning("Failed to save admin.yml: " + ex.getMessage());
+            ConsoleLog.warn("Failed to save admin.yml: " + ex.getMessage());
         }
     }
 
@@ -843,15 +833,15 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 if (p != null && p.isEnabled()) {
                     try {
                         Bukkit.getPluginManager().disablePlugin(p);
-                        getLogger().info("Force-disabled plugin from admin.yml: " + n);
+                        ConsoleLog.info("Force-disabled plugin from admin.yml: " + n);
                     } catch (Throwable t) {
-                        getLogger().warning("Failed to disable plugin " + n + ": " + t.getMessage());
+                        ConsoleLog.warn("Failed to disable plugin " + n + ": " + t.getMessage());
                     }
                 } else {
-                    getLogger().fine("Configured force-disabled plugin not loaded or already disabled: " + n);
+                    ConsoleLog.info("Configured force-disabled plugin not loaded or already disabled: " + n);
                 }
             } catch (Throwable t) {
-                getLogger().warning("Error while enforcing force-disabled plugin '" + n + "': " + t.getMessage());
+                ConsoleLog.warn("Error while enforcing force-disabled plugin '" + n + "': " + t.getMessage());
             }
         }
     }
@@ -863,7 +853,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
         try {
             adminConfig.save(adminFile);
         } catch (IOException ex) {
-            getLogger().warning("Failed to save force-disabled list to admin.yml: " + ex.getMessage());
+            ConsoleLog.warn("Failed to save force-disabled list to admin.yml: " + ex.getMessage());
         }
     }
 
@@ -874,11 +864,11 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             boolean m = adminConfig.getBoolean("maintenance", false);
             maintenanceMode = m;
             if (maintenanceMode) {
-                getLogger().info("Maintenance mode enabled from admin.yml — non-admins will be kicked on join.");
+                ConsoleLog.info("Maintenance mode enabled from admin.yml — non-admins will be kicked on join.");
                 enforceMaintenanceNow(null);
             }
         } catch (Throwable t) {
-            getLogger().warning("Failed to load maintenance state from admin.yml: " + t.getMessage());
+            ConsoleLog.warn("Failed to load maintenance state from admin.yml: " + t.getMessage());
         }
     }
 
@@ -889,7 +879,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
         try {
             adminConfig.save(adminFile);
         } catch (IOException ex) {
-            getLogger().warning("Failed to save maintenance state to admin.yml: " + ex.getMessage());
+            ConsoleLog.warn("Failed to save maintenance state to admin.yml: " + ex.getMessage());
         }
     }
 
@@ -914,6 +904,33 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                     pl.kickPlayer(msg);
                 }
             } catch (Throwable ignored) {}
+        }
+    }
+
+    private void setupErrorHandler() {
+        try {
+            Class<?> cls = Class.forName("kaiakk.multimedia.classes.ErrorHandler");
+            errorHandlerMethod = cls.getMethod("handle", org.bukkit.plugin.Plugin.class, String.class, Throwable.class);
+            ConsoleLog.info("Multimedia ErrorHandler initialized successfully");
+
+            Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+                try {
+                    if (errorHandlerMethod != null) {
+                        errorHandlerMethod.invoke(null, this.plugin, "Uncaught exception in thread " + thread.getName(), throwable);
+                    } else {
+                        ConsoleLog.error("Uncaught exception in thread " + thread.getName(), throwable);
+                    }
+                } catch (Throwable ex) {
+                    ConsoleLog.error("Uncaught exception in thread " + thread.getName(), throwable);
+                    ConsoleLog.error("ErrorHandler invocation failed", ex);
+                }
+            });
+        } catch (ClassNotFoundException cnf) {
+            ConsoleLog.info("Multimedia ErrorHandler not found; using default exception handlers.");
+        } catch (NoSuchMethodException nsm) {
+            ConsoleLog.warn("ErrorHandler.handle() method not found; using fallback handlers.");
+        } catch (Throwable t) {
+            ConsoleLog.warn("Failed to initialize multimedia ErrorHandler: " + t.getMessage());
         }
     }
 
@@ -962,9 +979,9 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                     } catch (Exception ignored) {}
                 }
             }
-            getLogger().info("Loaded " + bannedWordsDecoded.size() + " banned word(s) from config (base64-decoded)." + (invalidCount > 0 ? " Skipped " + invalidCount + " invalid entry(ies)." : ""));
+            ConsoleLog.info("Loaded " + bannedWordsDecoded.size() + " banned word(s) from config (base64-decoded)." + (invalidCount > 0 ? " Skipped " + invalidCount + " invalid entry(ies)." : ""));
         } catch (Exception ex) {
-            getLogger().warning("Failed to load bannedWordsList from config: " + ex.getMessage());
+            ConsoleLog.warn("Failed to load bannedWordsList from config: " + ex.getMessage());
         }
     }
 
@@ -1027,58 +1044,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
     @Override
     public void onPluginMessageReceived(String channel, Player player, byte[] message) {
-        if (player == null) return;
-        String ch = channel.toLowerCase();
-        UUID id = player.getUniqueId();
-        Set<String> set = detectedClients.computeIfAbsent(id, k -> new HashSet<>());
-
-        if (ch.contains("neoforge") && set.add("neoforge")) {
-            getLogger().info(player.getName() + " reported client: neoforge (via channel)");
-        }
-        if (ch.contains("quilt") && set.add("quilt")) {
-            getLogger().info(player.getName() + " reported client: quilt (via channel)");
-        }
-        if (ch.contains("fabric") && !ch.contains("quilt") && set.add("fabric")) {
-            getLogger().info(player.getName() + " reported client: fabric (via channel)");
-        }
-        if ((ch.contains("forge") || ch.contains("fml")) && !ch.contains("neoforge") && set.add("forge")) {
-            getLogger().info(player.getName() + " reported client: forge/fml (via channel)");
-        }
-
-        String asString = null;
-        try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(message))) {
-            try {
-                asString = in.readUTF();
-            } catch (Exception ignored) {
-                try {
-                    asString = new String(message, StandardCharsets.UTF_8);
-                } catch (Exception ignored2) {
-                    asString = null;
-                }
-            }
-        } catch (Exception ignored) {
-            try {
-                asString = new String(message, StandardCharsets.UTF_8);
-            } catch (Exception ignored2) {
-                asString = null;
-            }
-        }
-
-        if (asString != null) {
-            String pl = asString.toLowerCase();
-            if (pl.contains("neoforge") && set.add("neoforge")) {
-                getLogger().info(player.getName() + " reported client: neoforge (via payload)");
-            }
-            if (pl.contains("quilt") && set.add("quilt")) {
-                getLogger().info(player.getName() + " reported client: quilt (via payload)");
-            }
-            if ((pl.contains("fabric") || pl.contains("fabricloader") || pl.contains("fabric-mod")) && !pl.contains("quilt") && set.add("fabric")) {
-                getLogger().info(player.getName() + " reported client: fabric (via payload)");
-            }
-            if (!(pl.contains("neoforge")) && (pl.contains("forge") || pl.contains("fml") || pl.contains("minecraftforge")) && set.add("forge")) {
-                getLogger().info(player.getName() + " reported client: forge/fml (via payload)");
-            }
-        }
+        try { kaiakk.axior.Clients.getInstance().onPluginMessageReceived(channel, player, message); } catch (Throwable ignored) {}
     }
 
     @Override
@@ -1171,7 +1137,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 saveMaintenanceToConfig();
                 enforceMaintenanceNow(null);
                 sender.sendMessage(ChatColor.GREEN + "Maintenance mode enabled. Non-admin players were kicked.");
-                getLogger().info(sender.getName() + " enabled maintenance mode.");
+                ConsoleLog.info(sender.getName() + " enabled maintenance mode.");
                 return true;
             } else if (sub.equals("off") || sub.equals("false")) {
                 if (!maintenanceMode) {
@@ -1181,7 +1147,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 maintenanceMode = false;
                 saveMaintenanceToConfig();
                 sender.sendMessage(ChatColor.GREEN + "Maintenance mode disabled. Players may join again.");
-                getLogger().info(sender.getName() + " disabled maintenance mode.");
+                ConsoleLog.info(sender.getName() + " disabled maintenance mode.");
                 return true;
             } else {
                 sender.sendMessage(ChatColor.YELLOW + "Usage: /axmaintenance <on|off>");
@@ -1255,7 +1221,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 }
                 nameList.addBan(nameToBan, reason, expires, sender.getName());
                 sender.sendMessage("Player '" + nameToBan + "' has been banned (type: name)" + (days == 0 ? " permanently." : " for " + days + " day(s)."));
-                getLogger().info("[Ban] Player '" + nameToBan + "' was banned by '" + sender.getName() + "' (type: name)" + (days == 0 ? " permanently." : " for " + days + " day(s)."));
+                ConsoleLog.info("[Ban] Player '" + nameToBan + "' was banned by '" + sender.getName() + "' (type: name)" + (days == 0 ? " permanently." : " for " + days + " day(s)."));
 
                 if (target.isOnline()) {
                     Player p = Bukkit.getPlayer(target.getUniqueId());
@@ -1268,7 +1234,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                     String webhook = getConfig().getString("discord-webhook-url", "");
                     DiscordBukkit.sendReportAsync(getPlugin(), webhook, nameToBan, sender.getName(), "Banned (name) - " + reason, System.currentTimeMillis());
                 } catch (Exception e) {
-                    getLogger().warning("Failed to dispatch Discord webhook for ban: " + e.getMessage());
+                    ConsoleLog.warn("Failed to dispatch Discord webhook for ban: " + e.getMessage());
                 }
 
                 return true;
@@ -1293,7 +1259,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 }
                 ipList.addBan(ipAddress, reason, expires, sender.getName());
                 sender.sendMessage("IP '" + ipAddress + "' has been banned (type: ip)" + (days == 0 ? " permanently." : " for " + days + " day(s)."));
-                getLogger().info("[Ban] IP '" + ipAddress + "' (player: '" + targetName + "') was banned by '" + sender.getName() + "' (type: ip)" + (days == 0 ? " permanently." : " for " + days + " day(s)."));
+                ConsoleLog.info("[Ban] IP '" + ipAddress + "' (player: '" + targetName + "') was banned by '" + sender.getName() + "' (type: ip)" + (days == 0 ? " permanently." : " for " + days + " day(s)."));
 
                 p.kickPlayer(ChatColor.RED + "You have been IP banned: " + reason);
 
@@ -1301,7 +1267,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                     String webhook = getConfig().getString("discord-webhook-url", "");
                     DiscordBukkit.sendReportAsync(getPlugin(), webhook, ipAddress + " (player: " + targetName + ")", sender.getName(), "Banned (ip) - " + reason, System.currentTimeMillis());
                 } catch (Exception e) {
-                    getLogger().warning("Failed to dispatch Discord webhook for ip ban: " + e.getMessage());
+                    ConsoleLog.warn("Failed to dispatch Discord webhook for ip ban: " + e.getMessage());
                 }
 
                 return true;
@@ -1360,7 +1326,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                         DiscordBukkit.sendReportAsync(getPlugin(), webhook, targetName + " (IP pardoned)", sender.getName(), "Pardoned (ip)", System.currentTimeMillis());
                     }
                 } catch (Exception e) {
-                    getLogger().warning("Failed to dispatch Discord webhook for pardon: " + e.getMessage());
+                    ConsoleLog.warn("Failed to dispatch Discord webhook for pardon: " + e.getMessage());
                 }
             } else {
                 sender.sendMessage(ChatColor.YELLOW + "No name or IP ban found for '" + targetName + "'.");
@@ -1380,7 +1346,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             }
             final CommandSender cs = sender;
             final long start = System.nanoTime();
-            Bukkit.getScheduler().runTaskLater(getPlugin(), () -> {
+            SchedulerHelper.runLater(getPlugin(), () -> {
                 try {
                     long elapsed = (System.nanoTime() - start) / 1_000_000L;
                     cs.sendMessage(ChatColor.GREEN + "Pong! Response time: " + elapsed + " ms");
@@ -1594,10 +1560,10 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
                 viewer.openInventory(inv);
                 viewer.sendMessage(ChatColor.GREEN + "Opened inventory of " + target.getName() + ".");
-                try { getLogger().info(sender.getName() + " opened inventory of " + target.getName()); } catch (Exception ignored) {}
+                try { ConsoleLog.info(sender.getName() + " opened inventory of " + target.getName()); } catch (Exception ignored) {}
             } catch (Exception ex) {
                 sender.sendMessage(ChatColor.RED + "Failed to open inventory: " + ex.getMessage());
-                getLogger().warning("axinventory failed: " + ex.getMessage());
+                ConsoleLog.warn("axinventory failed: " + ex.getMessage());
             }
 
             return true;
@@ -1648,7 +1614,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
 
             String msg = "Player '" + nameToUse + "' warned (" + newCount + ")" + (reason != null && !reason.isEmpty() ? ": " + reason : "");
             sender.sendMessage(ChatColor.GREEN + msg);
-            getLogger().info("[Warn] " + nameToUse + " warned by " + sender.getName() + " (count=" + newCount + ") Reason: " + reason);
+            ConsoleLog.info("[Warn] " + nameToUse + " warned by " + sender.getName() + " (count=" + newCount + ") Reason: " + reason);
 
             for (Player p : Bukkit.getOnlinePlayers()) {
                 if (p != null && (p.hasPermission("axior.mod") || p.hasPermission("axior.admin") || p.hasPermission("axior.owner"))) {
@@ -1660,7 +1626,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 String webhook = getConfig().getString("discord-webhook-url", "");
                 DiscordBukkit.sendReportAsync(getPlugin(), webhook, nameToUse, sender.getName(), "Warned - " + reason, System.currentTimeMillis());
             } catch (Exception e) {
-                getLogger().warning("Failed to dispatch Discord webhook for warn: " + e.getMessage());
+                ConsoleLog.warn("Failed to dispatch Discord webhook for warn: " + e.getMessage());
             }
 
             int threshold = getConfig().getInt("warningsToBan", 0);
@@ -1672,17 +1638,17 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                     if (online != null) {
                         online.kickPlayer(ChatColor.RED + "You have been banned: " + banReason);
                     }
-                    getLogger().info("[AutoBan] " + nameToUse + " auto-banned after " + newCount + " warnings.");
+                    ConsoleLog.info("[AutoBan] " + nameToUse + " auto-banned after " + newCount + " warnings.");
                     try {
                         String webhook = getConfig().getString("discord-webhook-url", "");
                         DiscordBukkit.sendReportAsync(getPlugin(), webhook, nameToUse, "Axior-Auto", "Banned (auto) - " + reason, System.currentTimeMillis());
                     } catch (Exception ex) {
-                        getLogger().warning("Failed to dispatch Discord webhook for auto-ban: " + ex.getMessage());
+                        ConsoleLog.warn("Failed to dispatch Discord webhook for auto-ban: " + ex.getMessage());
                     }
                     warningsCount.remove(targetUuid);
                     saveMutesToConfig();
                 } catch (Exception ex) {
-                    getLogger().warning("Failed to auto-ban player after warnings: " + ex.getMessage());
+                    ConsoleLog.warn("Failed to auto-ban player after warnings: " + ex.getMessage());
                 }
             }
 
@@ -1729,7 +1695,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 lastReportTime.put(rid, now);
             }
 
-                getLogger().info("[Report] " + targetName + " has been reported by " + sender.getName() + " - reason: " + reason);
+                ConsoleLog.info("[Report] " + targetName + " has been reported by " + sender.getName() + " - reason: " + reason);
 
                 String alert = targetName + " has been reported by " + sender.getName() + "! Reason: " + reason;
                 for (Player p : Bukkit.getOnlinePlayers()) {
@@ -1749,14 +1715,14 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                     try {
                         adminConfig.save(adminFile);
                     } catch (IOException ex) {
-                        getLogger().warning("Failed to save report to admin.yml: " + ex.getMessage());
+                        ConsoleLog.warn("Failed to save report to admin.yml: " + ex.getMessage());
                     }
 
                     try {
                         String webhook = getConfig().getString("discord-webhook-url", "");
                         DiscordBukkit.sendReportAsync(getPlugin(), webhook, targetName, sender.getName(), reason, ts);
                     } catch (Exception e) {
-                        getLogger().warning("Failed to dispatch Discord webhook task: " + e.getMessage());
+                        ConsoleLog.warn("Failed to dispatch Discord webhook task: " + e.getMessage());
                     }
             }
             return true;
@@ -1830,7 +1796,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             String timeDescLog = (minutes == 0) ? "permanently" : ("for " + minutes + " minute(s)");
 
             sender.sendMessage("Player '" + targetName + "' has been muted " + timeDescShort + ". Reason: " + reason);
-            getLogger().info("[Mute] Player '" + targetName + "' was muted by '" + sender.getName() + "' " + timeDescLog + ". Reason: " + reason);
+            ConsoleLog.info("[Mute] Player '" + targetName + "' was muted by '" + sender.getName() + "' " + timeDescLog + ". Reason: " + reason);
 
             if (online != null) {
                 online.sendMessage(ChatColor.RED + "You have been muted " + timeDescShort + ". Reason: " + reason);
@@ -1842,7 +1808,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 String webhook = getConfig().getString("discord-webhook-url", "");
                 DiscordBukkit.sendReportAsync(getPlugin(), webhook, targetName, sender.getName(), "Muted " + timeDescLog + " - " + reason, System.currentTimeMillis());
             } catch (Exception e) {
-                getLogger().warning("Failed to dispatch Discord webhook for mute: " + e.getMessage());
+                ConsoleLog.warn("Failed to dispatch Discord webhook for mute: " + e.getMessage());
             }
 
             return true;
@@ -1877,13 +1843,13 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             saveMutesToConfig();
 
             sender.sendMessage("Player '" + targetName + "' has been unmuted.");
-            getLogger().info("[Unmute] Player '" + targetName + "' was unmuted by '" + sender.getName() + "'.");
+            ConsoleLog.info("[Unmute] Player '" + targetName + "' was unmuted by '" + sender.getName() + "'.");
 
             try {
                 String webhook = getConfig().getString("discord-webhook-url", "");
                 DiscordBukkit.sendReportAsync(getPlugin(), webhook, targetName, sender.getName(), "Unmuted", System.currentTimeMillis());
             } catch (Exception e) {
-                getLogger().warning("Failed to dispatch Discord webhook for unmute: " + e.getMessage());
+                ConsoleLog.warn("Failed to dispatch Discord webhook for unmute: " + e.getMessage());
             }
 
             return true;
@@ -1959,7 +1925,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             if (cfgMinutes < 0) cfgMinutes = 0L;
             sender.sendMessage(ChatColor.YELLOW + "Report cooldown: " + cfgMinutes + " minute(s)");
 
-            sender.sendMessage(ChatColor.YELLOW + "Detected client entries: " + detectedClients.size());
+            sender.sendMessage(ChatColor.YELLOW + "Detected client entries: " + kaiakk.axior.Clients.getTrackedCount());
             sender.sendMessage(ChatColor.YELLOW + "Vanished staff: " + vanished.size());
             sender.sendMessage(ChatColor.YELLOW + "Spy staff: " + spies.size());
             sender.sendMessage(ChatColor.YELLOW + "Frozen players: " + frozenExpiry.size());
@@ -1983,10 +1949,10 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "kill @e[type=lingering_potion]");
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "kill @e[type=evoker_fangs]");
                 Bukkit.broadcastMessage(ChatColor.GREEN + "Cleaned!");
-                getLogger().info("axclean executed console commands to remove various entities.");
+                ConsoleLog.info("axclean executed console commands to remove various entities.");
             } catch (Exception ex) {
                 sender.sendMessage(ChatColor.RED + "Failed to execute cleanup commands: " + ex.getMessage());
-                getLogger().warning("axclean command execution failed: " + ex.getMessage());
+                ConsoleLog.warn("axclean command execution failed: " + ex.getMessage());
             }
             return true;
         }
@@ -2044,14 +2010,14 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 boolean ok = Bukkit.dispatchCommand(sender, commandLine);
                 if (ok) {
                     sender.sendMessage(ChatColor.GREEN + "Executed: " + ChatColor.WHITE + commandLine);
-                    getLogger().info("axexecute by " + sender.getName() + " (as " + (sender instanceof Player ? "player" : "console") + "): " + commandLine);
+                    ConsoleLog.info("axexecute by " + sender.getName() + " (as " + (sender instanceof Player ? "player" : "console") + "): " + commandLine);
                 } else {
                     sender.sendMessage(ChatColor.YELLOW + "Command executed but returned false: " + commandLine);
-                    getLogger().info("axexecute returned false for " + sender.getName() + ": " + commandLine);
+                    ConsoleLog.info("axexecute returned false for " + sender.getName() + ": " + commandLine);
                 }
             } catch (Exception ex) {
                 sender.sendMessage(ChatColor.RED + "Failed to execute command: " + ex.getMessage());
-                getLogger().warning("axexecute failed: " + ex.getMessage());
+                ConsoleLog.warn("axexecute failed: " + ex.getMessage());
             }
             return true;
         }
@@ -2082,7 +2048,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             try {
                 source.sendMessage(ChatColor.GREEN + "You were teleported to " + target.getName() + " by " + sender.getName() + ".");
             } catch (Exception ignored) {}
-            getLogger().info(sender.getName() + " used /axtp to teleport " + source.getName() + " -> " + target.getName());
+            ConsoleLog.info(sender.getName() + " used /axtp to teleport " + source.getName() + " -> " + target.getName());
             return true;
         }
 
@@ -2238,7 +2204,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             
             proxyListener.connectOtherPlayer(executor, target.getName(), targetServer);
             sender.sendMessage(ChatColor.GREEN + "Sent " + target.getName() + " to server: " + targetServer);
-            getLogger().info(sender.getName() + " sent " + target.getName() + " to server: " + targetServer);
+            ConsoleLog.info(sender.getName() + " sent " + target.getName() + " to server: " + targetServer);
             return true;
         }
 
@@ -2285,7 +2251,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             
             proxyListener.kickPlayer(executor, targetName, reason);
             sender.sendMessage(ChatColor.GREEN + "Network kick sent for: " + targetName);
-            getLogger().info(sender.getName() + " kicked " + targetName + " from network. Reason: " + reason);
+            ConsoleLog.info(sender.getName() + " kicked " + targetName + " from network. Reason: " + reason);
             return true;
         }
 
@@ -2373,7 +2339,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             }
 
             sender.sendMessage(ChatColor.GREEN + "Axior: configuration reloaded.");
-            getLogger().info("Axior: configuration reloaded by " + sender.getName());
+            ConsoleLog.info("Axior: configuration reloaded by " + sender.getName());
             return true;
         }
         else if (cmd.equals("axfreeze")) {
@@ -2438,7 +2404,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             saveMutesToConfig();
 
             sender.sendMessage("Player '" + targetName + "' has been frozen.");
-            getLogger().info("[Freeze] Player '" + targetName + "' frozen by '" + sender.getName() + "'.");
+            ConsoleLog.info("[Freeze] Player '" + targetName + "' frozen by '" + sender.getName() + "'.");
             return true;
         }
         else if (cmd.equals("axunfreeze")) {
@@ -2474,7 +2440,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             saveMutesToConfig();
 
             sender.sendMessage("Player '" + targetName + "' has been unfrozen.");
-            getLogger().info("[Unfreeze] Player '" + targetName + "' unfrozen by '" + sender.getName() + "'.");
+            ConsoleLog.info("[Unfreeze] Player '" + targetName + "' unfrozen by '" + sender.getName() + "'.");
             return true;
         }
 
@@ -2502,7 +2468,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             player.sendMessage(ChatColor.GRAY + "You are now in ghost mode.");
             saveMutesToConfig();
             sender.sendMessage("You are now ghosted.");
-            getLogger().info("[Ghost] Player '" + targetName + "' ghosted themselves.");
+            ConsoleLog.info("[Ghost] Player '" + targetName + "' ghosted themselves.");
             return true;
         }
 
@@ -2530,7 +2496,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
             player.sendMessage(ChatColor.GREEN + "You are no longer in ghost mode.");
             saveMutesToConfig();
             sender.sendMessage("You have been un-ghosted.");
-            getLogger().info("[Unghost] Player '" + targetName + "' unghosted themselves.");
+            ConsoleLog.info("[Unghost] Player '" + targetName + "' unghosted themselves.");
             return true;
         }
 
@@ -2554,13 +2520,13 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 spies.add(id);
                 saveMutesToConfig();
                 sender.sendMessage(ChatColor.GREEN + "Spy mode enabled. You will see private messages.");
-                getLogger().info("[Spy] " + sender.getName() + " enabled spy mode.");
+                ConsoleLog.info("[Spy] " + sender.getName() + " enabled spy mode.");
                 return true;
             } else if (mode.equals("off")) {
                 spies.remove(id);
                 saveMutesToConfig();
                 sender.sendMessage(ChatColor.GREEN + "Spy mode disabled.");
-                getLogger().info("[Spy] " + sender.getName() + " disabled spy mode.");
+                ConsoleLog.info("[Spy] " + sender.getName() + " disabled spy mode.");
                 return true;
             } else {
                 sender.sendMessage(ChatColor.YELLOW + "Usage: /axspy <on|off>");
@@ -2766,13 +2732,13 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 try {
                     if (currentlyEnabled) {
                         Bukkit.getPluginManager().disablePlugin(p);
-                        getLogger().info("Disabled plugin on request: " + p.getName());
+                        ConsoleLog.info("Disabled plugin on request: " + p.getName());
                     } else {
-                        getLogger().fine("Plugin already disabled when requested: " + p.getName());
+                        ConsoleLog.info("Plugin already disabled when requested: " + p.getName());
                     }
                 } catch (Throwable t) {
                     sender.sendMessage(ChatColor.RED + "Failed to disable plugin: " + t.getMessage());
-                    getLogger().warning("Failed to disable plugin " + p.getName() + ": " + t.getMessage());
+                    ConsoleLog.warn("Failed to disable plugin " + p.getName() + ": " + t.getMessage());
                     return true;
                 }
 
@@ -2786,7 +2752,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 } else {
                     sender.sendMessage(ChatColor.GREEN + "Plugin '" + p.getName() + "' is currently disabled and has been added to the force-disabled list.");
                 }
-                getLogger().info(sender.getName() + " force-disabled plugin " + p.getName());
+                ConsoleLog.info(sender.getName() + " force-disabled plugin " + p.getName());
                 return true;
             } else {
                 if (currentlyEnabled && !alreadyPersisted) {
@@ -2833,7 +2799,7 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 boolean removed = forceDisabled.remove(p.getName());
                 if (removed) saveForceDisabledToConfig();
                 sender.sendMessage(ChatColor.YELLOW + "Plugin '" + p.getName() + "' is already enabled." + (removed ? " Removed from force-disabled list." : ""));
-                getLogger().info(sender.getName() + " attempted to enable plugin already enabled: " + p.getName());
+                ConsoleLog.info(sender.getName() + " attempted to enable plugin already enabled: " + p.getName());
                 return true;
             }
 
@@ -2846,13 +2812,13 @@ public final class AxiorBukkit implements org.bukkit.command.CommandExecutor, Ta
                 Bukkit.getPluginManager().enablePlugin(p);
             } catch (Throwable t) {
                 sender.sendMessage(ChatColor.RED + "Failed to enable plugin: " + t.getMessage());
-                getLogger().warning("Failed to enable plugin " + p.getName() + ": " + t.getMessage());
+                ConsoleLog.warn("Failed to enable plugin " + p.getName() + ": " + t.getMessage());
                 return true;
             }
             boolean removed = forceDisabled.remove(p.getName());
             if (removed) saveForceDisabledToConfig();
             sender.sendMessage(ChatColor.GREEN + "Plugin '" + p.getName() + "' enabled." + (removed ? " Removed from force-disabled list." : ""));
-            getLogger().info(sender.getName() + " enabled plugin " + p.getName());
+            ConsoleLog.info(sender.getName() + " enabled plugin " + p.getName());
             return true;
         }
 

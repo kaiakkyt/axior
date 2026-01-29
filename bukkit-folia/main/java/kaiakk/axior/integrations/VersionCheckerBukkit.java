@@ -1,7 +1,8 @@
 package kaiakk.axior.integrations;
 
-import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
+import kaiakk.multimedia.classes.ConsoleLog;
+import kaiakk.multimedia.classes.SchedulerHelper;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -14,49 +15,32 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class VersionCheckerFolia {
+public class VersionCheckerBukkit {
 	private static final Pattern VERSION_PATTERN = Pattern.compile("\\b(\\d+(?:\\.\\d+)+)\\b");
-	private static final String MODRINTH_VERSIONS_URL = "https://modrinth.com/plugin/axior/versions";
+	private static final String MODRINTH_VERSIONS_URL = "https://api.modrinth.com/v2/project/axior/version";
+	private static final Pattern VERSION_NUM_PATTERN = Pattern.compile("\"version_number\"\\s*:\\s*\"([^\"]+)\"");
+	private static final Pattern VERSION_FORMAT_PATTERN = Pattern.compile("^[vV]?(\\d+)\\.(\\d{2})\\.(\\d{2})(?:[.-].*)?$");
 
 	public static void check(JavaPlugin plugin, String currentVersion) {
 		if (plugin == null) return;
-		try {
-			Object asyncScheduler = null;
+		SchedulerHelper.runAsync(plugin, () -> {
 			try {
-				java.lang.reflect.Method getAsyncScheduler = Bukkit.class.getMethod("getAsyncScheduler");
-				asyncScheduler = getAsyncScheduler.invoke(Bukkit.getServer());
-			} catch (Exception e) {
-				plugin.getLogger().warning("Failed to get AsyncScheduler: " + e.getMessage());
-				return;
-			}
-
-			if (asyncScheduler == null) {
-				plugin.getLogger().warning("AsyncScheduler is null, cannot run version check");
-				return;
-			}
-
-			java.lang.reflect.Method runNow = asyncScheduler.getClass().getMethod("runNow", org.bukkit.plugin.Plugin.class, java.util.function.Consumer.class);
-			runNow.invoke(asyncScheduler, plugin, (java.util.function.Consumer<Object>) task -> {
-				try {
-					String latest = fetchLatestVersion();
-					if (latest == null) {
-						plugin.getLogger().fine("Version check: couldn't find any version on Modrinth page.");
-						return;
-					}
-					if (isNewer(latest, currentVersion)) {
-						plugin.getLogger().info("A new Axior version is available: " + latest + " (you have " + currentVersion + "). See: " + MODRINTH_VERSIONS_URL);
-					} else {
-						plugin.getLogger().fine("Axior is up to date (" + currentVersion + ").");
-					}
-				} catch (IOException e) {
-					plugin.getLogger().severe("Version check failed: " + e.getMessage());
-				} catch (Throwable t) {
-					plugin.getLogger().log(java.util.logging.Level.SEVERE, "Version check failed", t);
+				String latest = fetchLatestVersion();
+				if (latest == null) {
+					ConsoleLog.info("Version check: couldn't find any version on Modrinth page.");
+					return;
 				}
-			});
-		} catch (Throwable t) {
-			plugin.getLogger().log(java.util.logging.Level.SEVERE, "VersionCheckerFolia failed to schedule async task", t);
-		}
+				if (isNewer(latest, currentVersion)) {
+					ConsoleLog.info("A new Axior version is available: " + latest + " (you have " + currentVersion + "). See: " + MODRINTH_VERSIONS_URL);
+				} else {
+					ConsoleLog.info("Axior is up to date (" + currentVersion + ").");
+				}
+				} catch (IOException e) {
+					ConsoleLog.error("Version check failed: " + e.getMessage());
+				} catch (Throwable t) {
+					ConsoleLog.error("Version check failed", t);
+				}
+		});
 	}
 
 	private static String fetchLatestVersion() throws Exception {
@@ -67,6 +51,8 @@ public class VersionCheckerFolia {
 			conn.setRequestMethod("GET");
 			conn.setConnectTimeout(10000);
 			conn.setReadTimeout(10000);
+			conn.setRequestProperty("Accept", "application/json");
+			conn.setRequestProperty("User-Agent", "Axior-VersionChecker/1.0 (+https://modrinth.com/plugin/axior)");
 
 			int code = conn.getResponseCode();
 			java.io.InputStream stream = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
@@ -81,25 +67,26 @@ public class VersionCheckerFolia {
 			}
 			if (code < 200 || code >= 300) {
 				String bodyStr = body.toString().trim();
-				throw new IOException("Modrinth responded with HTTP " + code + ": " + truncate(bodyStr, 500));
+				throw new IOException("Modrinth API responded with HTTP " + code + ": " + truncate(bodyStr, 500));
 			}
 
 			String content = body.toString();
-			String line;
 			List<String> versions = new ArrayList<>();
-			try (BufferedReader in = new BufferedReader(new java.io.StringReader(content))) {
-				while ((line = in.readLine()) != null) {
-					Matcher m = VERSION_PATTERN.matcher(line);
-					while (m.find()) {
-						String v = m.group(1);
-						if (v.chars().filter(ch -> ch == '.').count() >= 2) {
-							versions.add(v);
-						}
-					}
+
+			Matcher m = VERSION_NUM_PATTERN.matcher(content);
+			while (m.find()) {
+				String v = m.group(1);
+				if (v == null) continue;
+				v = v.trim();
+				Matcher fmt = VERSION_FORMAT_PATTERN.matcher(v);
+				if (fmt.matches()) {
+					if (v.startsWith("v") || v.startsWith("V")) v = v.substring(1);
+					versions.add(v);
 				}
 			}
+
 			if (versions.isEmpty()) return null;
-			Collections.sort(versions, VersionCheckerFolia::compareVersions);
+			Collections.sort(versions, VersionCheckerBukkit::compareVersions);
 			return versions.get(versions.size() - 1);
 		} finally {
 			if (conn != null) conn.disconnect();
